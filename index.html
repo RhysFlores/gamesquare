@@ -1,0 +1,3631 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gamesquare</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<style>
+  @font-face { font-family: "GameCube"; src: url("GameCube.ttf") format("truetype"); }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+  #emu { position: fixed; inset: 0; background: #000; display: none; z-index: 3; }
+  #emu.on { display: block; }
+  #emu iframe { width: 100%; height: 100%; border: 0; display: block; }
+  #emuClose {
+    position: absolute; top: 14px; right: 14px; z-index: 2; width: 40px; height: 40px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,.25); background: rgba(20,16,40,.7); color: #e8e4ff; font-size: 18px; cursor: pointer;
+  }
+  /* loading screen over a starting game: a rolling glass cube, a bar and a time estimate */
+  #loading {
+    position: absolute; inset: 0; background: #000; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 34px; color: #e8e4ff; font: 600 15px/1.4 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    transition: opacity .6s ease;
+  }
+  #loading { cursor: pointer; }
+  #loading.done { opacity: 0; pointer-events: none; }
+  .ld-stage { perspective: 420px; }
+  .ld-cube { width: 72px; height: 72px; position: relative; transform-style: preserve-3d; animation: ld-roll 2.6s infinite; }
+  .ld-cube div {
+    position: absolute; inset: 0; border-radius: 12px; border: 2px solid rgba(205,195,255,.85);
+    background: rgba(120,100,240,.16); box-shadow: inset 0 0 22px rgba(150,130,255,.55), 0 0 18px rgba(140,120,255,.35);
+  }
+  .ld-cube div:nth-child(1) { transform: translateZ(36px); }
+  .ld-cube div:nth-child(2) { transform: rotateY(90deg) translateZ(36px); }
+  .ld-cube div:nth-child(3) { transform: rotateY(180deg) translateZ(36px); }
+  .ld-cube div:nth-child(4) { transform: rotateY(-90deg) translateZ(36px); }
+  .ld-cube div:nth-child(5) { transform: rotateX(90deg) translateZ(36px); }
+  .ld-cube div:nth-child(6) { transform: rotateX(-90deg) translateZ(36px); }
+  /* quarter turns with a pause between, like the cube rolling tile to tile */
+  @keyframes ld-roll {
+    0%, 15% { transform: rotateX(-24deg) rotateY(0); }
+    25%, 40% { transform: rotateX(-24deg) rotateY(90deg); }
+    50%, 65% { transform: rotateX(-24deg) rotateY(180deg); }
+    75%, 90% { transform: rotateX(-24deg) rotateY(270deg); }
+    100% { transform: rotateX(-24deg) rotateY(360deg); }
+  }
+  .ld-cube { animation-timing-function: cubic-bezier(.55, 0, .35, 1); }
+  #ldName { font-size: 22px; font-weight: 700; color: #fff; max-width: 80vw; text-align: center; }
+  .ld-bar { width: min(320px, 70vw); height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; }
+  #ldFill { height: 100%; width: 0; border-radius: 3px; background: linear-gradient(90deg, #6b5dde, #c4bbff); box-shadow: 0 0 12px rgba(150,130,255,.8); }
+  #ldText { color: rgba(220,215,240,.75); font-size: 14px; letter-spacing: .04em; }
+  #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity .35s ease; z-index: 2; }
+  #chunks { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 4; }   /* above a running game too */
+  #eggCanvas { position: fixed; inset: 0; width: 100%; height: 100%; display: none; z-index: 5; pointer-events: none; }
+  #eggText {
+    position: fixed; inset: 0; display: grid; place-items: center; z-index: 6; pointer-events: none; opacity: 0;
+    text-align: center; line-height: 1.5;
+    color: #fff; font: clamp(26px, 5vw, 54px)/1 "GameCube", "Arial Black", Arial, sans-serif; letter-spacing: .08em;
+  }
+  /* the Terms of Service: a long grey column of very small print */
+  #tos { position: fixed; inset: 0; z-index: 4; display: none; background: rgba(6,4,18,.97); }
+  #tos.on { display: block; }
+  #tosScroll { position: absolute; inset: 0 0 44px; overflow-y: auto; }
+  #tosBody {
+    max-width: 720px; margin: 0 auto; padding: 56px 24px 80px; color: rgba(214,210,232,.62);
+    font: 12.5px/1.6 "Helvetica Neue", Helvetica, Arial, sans-serif; text-align: justify;
+  }
+  #tosBody h1 { font-size: 18px; color: #e8e4ff; letter-spacing: .08em; text-align: center; margin: 0 0 6px; }
+  #tosBody h2 { font-size: 12.5px; color: rgba(232,228,255,.8); margin: 26px 0 6px; letter-spacing: .03em; }
+  #tosBody p { margin: 0 0 10px; }
+  /* a big scrubber down the right edge: drag or click anywhere on it to jump */
+  #tosScroll { scrollbar-width: none; }
+  #tosScroll::-webkit-scrollbar { display: none; }
+  #tosBar {
+    position: absolute; top: 12px; bottom: 56px; right: 14px; width: 18px; border-radius: 9px; cursor: pointer;
+    background: rgba(196,187,255,.1); touch-action: none;
+  }
+  #tosThumb {
+    position: absolute; left: 0; right: 0; height: 64px; border-radius: 9px; background: #8f7cff;
+    box-shadow: 0 0 12px rgba(150,130,255,.6);
+  }
+  #tosPct {
+    position: absolute; right: 26px; top: 50%; transform: translateY(-50%); white-space: nowrap;
+    color: #c4bbff; font: 600 11px "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  #tosHint {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 44px; line-height: 44px; text-align: center;
+    color: rgba(196,187,255,.7); font: 600 12px "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: .08em;
+    border-top: 1px solid rgba(196,187,255,.12);
+  }
+  #credits {
+    position: fixed; inset: 0; z-index: 7; display: none; overflow: hidden; pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(10,8,30,.7), rgba(0,0,0,.92));
+  }
+  #credits.on { display: block; }
+  #creditsRoll {
+    position: absolute; left: 0; right: 0; top: 100%; text-align: center; color: #e8e4ff;
+    font: 500 18px/1.9 "Helvetica Neue", Helvetica, Arial, sans-serif; animation: credits 16s linear forwards;
+  }
+  #creditsRoll h3 { font: 22px/1 "GameCube", "Arial Black", sans-serif; letter-spacing: .1em; margin: 34px 0 12px; color: #fff; }
+  #creditsRoll small { color: rgba(196,187,255,.7); font-size: 13px; letter-spacing: .12em; }
+  @keyframes credits { to { transform: translateY(calc(-100% - 100vh)); } }
+  body.film canvas { filter: grayscale(1) sepia(.45) contrast(1.15) brightness(.95); }
+  body.film::after {
+    content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 5;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.6)); animation: flicker .12s steps(2) infinite;
+  }
+  @keyframes flicker { 50% { opacity: .82; } }
+  #caption {
+    position: fixed; left: 50%; bottom: 7vh; transform: translateX(-50%); z-index: 6; pointer-events: none; opacity: 0;
+    max-width: 86vw; text-align: center; color: #fff; text-shadow: 0 0 3px #000, 0 2px 4px #000;
+    font: 500 clamp(16px, 2.3vw, 23px)/1.35 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    transition: opacity .25s;
+  }
+  #title .logo { pointer-events: auto; cursor: pointer; }
+  #title.wobble .logo { animation: wobble .7s ease; }
+  @keyframes wobble { 20% { transform: rotate(-6deg); } 40% { transform: rotate(5deg); } 60% { transform: rotate(-3deg); } 80% { transform: rotate(2deg); } }
+  #title {
+    position: fixed; left: 0; right: 0; bottom: 15vh; text-align: center; pointer-events: none; opacity: 0;
+    font: clamp(28px, 5.6vw, 60px)/1 "GameCube", "Arial Black", Arial, sans-serif; letter-spacing: .06em;
+  }
+  /* two stacked copies: a dark extruded layer behind, a shiny silver face on top */
+  .logo { display: inline-grid; }
+  .logo > span { grid-area: 1 / 1; }
+  .depth {
+    color: #3c3c46;
+    text-shadow: 0 1px 0 #6e6e7a, 0 2px 0 #5c5c68, 0 3px 0 #4a4a56, 0 4px 0 #383844, 0 6px 12px rgba(0,0,0,.7);
+  }
+  .face {
+    color: transparent; -webkit-background-clip: text; background-clip: text;
+    background-image:
+      linear-gradient(110deg, transparent 42%, rgba(255,255,255,.95) 50%, transparent 58%),
+      linear-gradient(180deg, #ffffff 0%, #ececf2 35%, #c8c8d2 65%, #9696a2 100%);
+    background-size: 300% 100%, 100% 100%;
+    background-position: 150% 0, 0 0;
+    background-repeat: no-repeat;
+  }
+  .shine .face { animation: sheen 1.4s ease-in-out forwards; }
+  .rainbow .face {
+    background-image: linear-gradient(90deg, #ff6b6b, #ffd36b, #8dff8a, #6bd6ff, #b46bff, #ff6bd5, #ff6b6b);
+    background-size: 200% 100%; animation: rainbow 2s linear infinite;
+  }
+  @keyframes rainbow { to { background-position: -200% 0; } }
+  @keyframes sheen { to { background-position: -50% 0, 0 0; } }
+</style>
+</head>
+<body>
+<div id="fade"></div>
+<canvas id="chunks"></canvas>
+<div id="emu">
+  <div id="loading">
+    <div class="ld-stage"><div class="ld-cube"><div></div><div></div><div></div><div></div><div></div><div></div></div></div>
+    <div id="ldName"></div>
+    <div class="ld-bar"><div id="ldFill"></div></div>
+    <div id="ldText"></div>
+  </div>
+  <button id="emuClose" aria-label="Back to menu">&#x2715;</button>
+</div>
+<canvas id="eggCanvas"></canvas>
+<div id="eggText">3 days later</div>
+<div id="caption"></div>
+<div id="credits"><div id="creditsRoll"></div></div>
+<div id="tos">
+  <div id="tosScroll"><div id="tosBody"></div></div>
+  <div id="tosBar"><div id="tosThumb"><span id="tosPct">0%</span></div></div>
+  <div id="tosHint">&#8593; &#8595; scroll &nbsp;&middot;&nbsp; drag the bar on the right to skip &nbsp;&middot;&nbsp; End jumps to the bottom &nbsp;&middot;&nbsp; Tab back</div>
+</div>
+<div id="title"><span class="logo"><span class="depth">GAMESQUARE</span><span class="face">GAMESQUARE</span></span></div>
+<audio id="snd" src="start.mp3" preload="auto"></audio>
+<audio id="whoosh" src="whoosh.mp3" preload="auto"></audio>
+<audio id="menu" src="menumusic.mp3" preload="auto" loop></audio>
+<audio id="turn" src="turn.mp3" preload="auto"></audio>
+<audio id="turnCenter" src="turn-center.mp3" preload="auto"></audio>
+<audio id="selectSnd" src="menu-select.mp3" preload="auto"></audio>
+<audio id="hoverSnd" src="hover.wav" preload="auto"></audio>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ---- timeline, matched to start.mp3 ----
+// The thuds sit on a steady 0.26s beat from 0.72s to 3.84s: the cube lands on every one.
+const DROP = 0.36, BEAT = 0.26, FIRST_LAND = 0.72;
+const ROLL_START = FIRST_LAND - BEAT;
+const CHIME = 4.30, SONG_END = 7.3;
+// 2s after the startup sound ends, the logo gathers into a see-through cube that flies up to the camera
+const OUT = SONG_END + 2, FORM = 0.85, APPROACH = 2.4;
+
+// ---- path: 5x5 square ring with a 2-tile gap on the right so it reads as a G ----
+const path = [];
+for (let x = 4; x >= 0; x--) path.push([x, 0]);
+for (let z = 1; z <= 4; z++) path.push([0, z]);
+for (let x = 1; x <= 4; x++) path.push([x, 4]);
+path.push([4, 3]);
+const N = path.length - 1;
+const ROLL_END = ROLL_START + N * BEAT;              // 3.84, the last thud
+const HOP_END = 4.18;
+const landTime = i => (i === 0 ? DROP : ROLL_START + i * BEAT);
+const cell = i => new THREE.Vector3(path[i][0] - 2, 0, path[i][1] - 2);
+const CORE = 1.5;                                      // size of the inner square
+
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const easeOut = f => 1 - Math.pow(1 - f, 3);
+const easeInOut = f => (1 - Math.cos(Math.PI * f)) / 2;
+const smoother = f => f * f * f * (f * (6 * f - 15) + 10);
+const lerp = THREE.MathUtils.lerp, rad = THREE.MathUtils.degToRad;
+
+// ---- scene ----
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+const sun = new THREE.DirectionalLight(0xffffff, 0.75);
+sun.position.set(5, 12, 7);
+scene.add(sun);
+
+// box with rounded edges: pull every vertex onto a sphere around the shrunken inner box
+function roundedBox(size, radius, seg) {
+  const g = new THREE.BoxGeometry(size, size, size, seg, seg, seg);
+  const pos = g.attributes.position, nor = g.attributes.normal;
+  const h = size / 2 - radius, min = new THREE.Vector3(-h, -h, -h), max = new THREE.Vector3(h, h, h);
+  const v = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    c.copy(v).clamp(min, max);
+    v.sub(c).normalize();
+    nor.setXYZ(i, v.x, v.y, v.z);
+    c.addScaledVector(v, radius);
+    pos.setXYZ(i, c.x, c.y, c.z);
+  }
+  return g;
+}
+
+// flat, unlit 2D squares
+const TILE = new THREE.Color(0x5546d6), TILE_LIT = new THREE.Color(0xc4bbff);
+const makeTile = (pos, size) => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ color: TILE, transparent: true, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.copy(pos).setY(0.001);
+  scene.add(m);
+  return m;
+};
+const tiles = path.map((_, i) => makeTile(cell(i), 0.94));
+const core = makeTile(new THREE.Vector3(0, 0, 0), CORE);
+
+const cube = new THREE.Mesh(
+  roundedBox(1, 0.12, 16),
+  new THREE.MeshLambertMaterial({ color: 0x9b8cff, emissive: 0x3b2fa0, emissiveIntensity: 0.5 })
+);
+scene.add(cube);
+
+// glass: nearly clear where you look straight through, glowing along the rounded edges,
+// with a soft gloss band sliding across
+const glassMat = new THREE.ShaderMaterial({
+  uniforms: { opacity: { value: 0 }, time: { value: 0 }, tint: { value: new THREE.Color(0x9d8cff) } },
+  vertexShader: `
+    varying vec3 vN; varying vec3 vP;
+    void main() {
+      vN = normalize(normalMatrix * normal);
+      vP = position;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`,
+  fragmentShader: `
+    uniform float opacity; uniform float time; uniform vec3 tint;
+    varying vec3 vN; varying vec3 vP;
+    void main() {
+      float rim = pow(1.0 - abs(normalize(vN).z), 1.6);
+      float sweep = mod(time * 0.5, 3.0) * 2.0 - 2.0;
+      float band = smoothstep(0.22, 0.0, abs(vP.x + vP.y - sweep)) * 0.3;
+      vec3 col = mix(tint, vec3(1.0), clamp(rim * 0.7 + band, 0.0, 1.0));
+      gl_FragColor = vec4(col * opacity * (0.06 + rim * 0.9 + band), 1.0);
+    }`,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+});
+
+const GHOST = 2.2, SPIN_AXIS = new THREE.Vector3(1, 1, 0.4).normalize();
+const ghost = new THREE.Group();
+const glassMesh = new THREE.Mesh(cube.geometry, glassMat);
+glassMesh.renderOrder = 2;
+ghost.add(glassMesh);
+
+// menu labels around the edges of the front face
+function labelTexture() {
+  const S = 1024, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#f2f2f6';
+  g.font = `bold ${S * 0.095}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = 'rgba(0,0,0,.6)';
+  g.shadowBlur = S * 0.01;
+  const label = (text, x, y, angle) => {
+    g.save(); g.translate(x, y); g.rotate(angle); g.fillText(text, 0, 0); g.restore();
+  };
+  const edge = S * 0.088;
+  label('Game Play', S / 2, edge, 0);
+  label('Memory Card', S / 2, S - edge, 0);
+  label('Calendar', S - edge, S / 2, Math.PI / 2);
+  label('Options', edge, S / 2, -Math.PI / 2);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 8;
+  return tex;
+}
+const labelMat = new THREE.MeshBasicMaterial({ map: labelTexture(), transparent: true, depthWrite: false, opacity: 0 });
+const labels = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), labelMat);
+labels.position.z = 0.503;
+labels.renderOrder = 3;
+ghost.add(labels);
+
+// button hint, e.g. [Enter] ··· Confirm: a glowing green key, dots, then the action.
+// (bx, hy) is the key's left edge and vertical centre; S scales everything.
+function buttonHint(g, bx, hy, S, key, action) {
+  const font = px => `bold ${px}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  const bh = S * 0.085, bw = S * 0.2;
+  g.save();
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.save();
+  g.shadowColor = 'rgba(70,200,150,.9)';
+  g.shadowBlur = S * 0.03;
+  const btn = g.createRadialGradient(bx + bw / 2, hy, 0, bx + bw / 2, hy, bw / 2);
+  btn.addColorStop(0, '#2b7a5c'); btn.addColorStop(1, '#174a38');
+  g.fillStyle = btn;
+  g.beginPath(); g.roundRect(bx, hy - bh / 2, bw, bh, bh / 2); g.fill();
+  g.restore();
+  g.fillStyle = '#d6f2e6';
+  g.font = font(S * 0.05);
+  g.fillText(key, bx + bw / 2, hy + S * 0.003);
+  g.fillStyle = '#f2f2f6';
+  g.font = font(S * 0.055);
+  g.fillText('\u00b7\u00b7\u00b7', bx + bw + S * 0.06, hy - S * 0.006);
+  g.textAlign = 'left';
+  g.font = font(S * 0.066);
+  g.fillText(action, bx + bw + S * 0.11, hy);
+  g.restore();
+}
+
+// Memory Card screen on the bottom face: comes to the front when you press down
+function memoryCardTexture() {
+  const S = 1024, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+  const font = px => `bold ${px}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+
+  g.fillStyle = '#f2f2f6';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = 'rgba(0,0,0,.6)';
+  g.shadowBlur = S * 0.01;
+  g.font = font(S * 0.1);
+  g.fillText('Memory Card', S / 2, S * 0.12);
+
+  // memory card slot
+  {
+    const w = S * 0.4, x = (S - w) / 2, y = S * 0.25, h = S * 0.5;
+    g.lineWidth = S * 0.005;
+    g.strokeStyle = 'rgba(255,255,255,.9)';
+    g.beginPath(); g.roundRect(x, y, w, h, S * 0.015); g.stroke();
+    g.fillStyle = 'rgba(205,205,215,.6)';
+    g.beginPath(); g.roundRect(x + w * 0.06, y + h * 0.82, w * 0.88, h * 0.07, h * 0.035); g.fill();
+  }
+
+  buttonHint(g, S * 0.24, S * 0.88, S, 'Enter', 'Confirm');
+
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 8;
+  return tex;
+}
+const cardMat = new THREE.MeshBasicMaterial({ map: memoryCardTexture(), transparent: true, depthWrite: false, opacity: 0 });
+const card = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), cardMat);
+card.rotation.x = Math.PI / 2;           // faces down, reads upright once turned to the front
+card.position.y = -0.503;
+card.renderOrder = 3;
+ghost.add(card);
+
+// Game Play screen on the top face: comes to the front when you press up
+function gamePlayTexture() {
+  const S = 1024, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#f2f2f6';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = 'rgba(0,0,0,.6)';
+  g.shadowBlur = S * 0.01;
+  g.font = `bold ${S * 0.1}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  g.fillText('Game Play', S / 2, S * 0.12);
+
+  // game disc
+  const cx = S / 2, cy = S * 0.48, R = S * 0.24;
+  g.fillStyle = 'rgba(255,255,255,.1)';
+  g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.arc(cx, cy, R * 0.18, 0, Math.PI * 2, true); g.fill();
+  g.lineWidth = S * 0.005;
+  g.strokeStyle = 'rgba(255,255,255,.9)';
+  g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.arc(cx, cy, R * 0.18, 0, Math.PI * 2); g.stroke();
+  g.strokeStyle = 'rgba(255,255,255,.35)';
+  g.beginPath(); g.arc(cx, cy, R * 0.42, 0, Math.PI * 2); g.stroke();
+
+  buttonHint(g, S * 0.24, S * 0.88, S, 'Enter', 'Confirm');
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 8;
+  return tex;
+}
+const playMat = new THREE.MeshBasicMaterial({ map: gamePlayTexture(), transparent: true, depthWrite: false, opacity: 0 });
+const playFace = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), playMat);
+playFace.rotation.x = -Math.PI / 2;          // faces up, reads upright once turned to the front
+playFace.position.y = 0.503;
+playFace.renderOrder = 3;
+ghost.add(playFace);
+
+// Options screen on the left face: comes to the front when you press left
+function optionsTexture() {
+  const S = 1024, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#f2f2f6';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = 'rgba(0,0,0,.6)';
+  g.shadowBlur = S * 0.01;
+  g.font = `bold ${S * 0.1}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  g.fillText('Options', S / 2, S * 0.12);
+
+  // gear outline
+  const cx = S / 2, cy = S * 0.48, R = S * 0.2;
+  g.lineWidth = S * 0.005;
+  g.strokeStyle = 'rgba(255,255,255,.9)';
+  g.fillStyle = 'rgba(255,255,255,.1)';
+  g.beginPath();
+  for (let i = 0; i < 16; i++) {   // 8 teeth: alternate outer and inner radius
+    const r = i % 2 ? R * 0.78 : R, a0 = (i - 0.5) / 16 * Math.PI * 2, a1 = (i + 0.5) / 16 * Math.PI * 2;
+    g.arc(cx, cy, r, a0, a1);
+  }
+  g.closePath();
+  g.fill();
+  g.stroke();
+  g.beginPath(); g.arc(cx, cy, R * 0.32, 0, Math.PI * 2); g.stroke();
+
+  buttonHint(g, S * 0.24, S * 0.88, S, 'Enter', 'Confirm');
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 8;
+  return tex;
+}
+const optionsMat = new THREE.MeshBasicMaterial({ map: optionsTexture(), transparent: true, depthWrite: false, opacity: 0 });
+const optionsFace = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), optionsMat);
+optionsFace.rotation.y = -Math.PI / 2;    // faces left, reads upright once turned to the front
+optionsFace.position.x = -0.503;
+optionsFace.renderOrder = 3;
+ghost.add(optionsFace);
+
+// ---- hold D: Skylersquare ----
+let skyler = false;
+const skylerImg = new Image();
+skylerImg.src = 'skyler.png';
+const skylerCanvas = document.createElement('canvas');
+skylerCanvas.width = skylerCanvas.height = 512;
+const skylerTex = new THREE.CanvasTexture(skylerCanvas);
+// a square around his face (it sits up and to the right in the photo)
+function drawSkyler() { skylerCanvas.getContext('2d').drawImage(skylerImg, 312, 150, 520, 520, 0, 0, 512, 512); skylerTex.needsUpdate = true; }
+const skylerFace = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.62), new THREE.MeshBasicMaterial({ map: skylerTex, transparent: true, opacity: 0, side: THREE.DoubleSide }));
+skylerFace.renderOrder = 1;
+skylerFace.visible = false;
+ghost.add(skylerFace);
+function skylerMode() {
+  skyler = true;
+  const ready = () => {
+    drawSkyler();
+    try { document.querySelector('link[rel=icon]').href = skylerCanvas.toDataURL(); } catch {}
+  };
+  skylerImg.complete ? ready() : skylerImg.addEventListener('load', ready);
+  [...tiles, core].forEach(m => { m.material.map = skylerTex; m.material.needsUpdate = true; });
+  TILE.setHex(0xd8d2ee);
+  TILE_LIT.setHex(0xffffff);
+  cube.material.map = skylerTex;
+  cube.material.color.setHex(0xffffff);
+  cube.material.emissive.setHex(0x1a1a22);
+  cube.material.needsUpdate = true;
+  document.querySelectorAll('#title .logo span').forEach(sp => (sp.textContent = 'SKYLERSQUARE'));
+  document.title = 'Skylersquare';
+  skylerFace.visible = true;
+}
+
+// Calendar screen on the right face: comes to the front when you press right, shows the live date and time
+const calCanvas = document.createElement('canvas');
+calCanvas.width = calCanvas.height = 1024;
+const calTex = new THREE.CanvasTexture(calCanvas);
+calTex.anisotropy = 8;
+let calShown = '';
+function drawCalendar(d) {
+  const S = 1024, g = calCanvas.getContext('2d');
+  const pad = n => String(n).padStart(2, '0');
+  const date = `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()}`;
+  const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+  const time = [d.getHours(), d.getMinutes(), d.getSeconds()].map(pad).join(' : ');
+  if (date + time === calShown) return;
+  calShown = date + time;
+  g.clearRect(0, 0, S, S);
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillStyle = 'rgba(255,255,255,.1)';
+  g.beginPath(); g.roundRect(S * 0.04, S * 0.24, S * 0.92, S * 0.15, S * 0.02); g.fill();
+  g.beginPath(); g.roundRect(S * 0.04, S * 0.7, S * 0.92, S * 0.15, S * 0.02); g.fill();
+  g.fillStyle = '#f2f2f6';
+  g.shadowColor = 'rgba(0,0,0,.6)';
+  g.shadowBlur = S * 0.01;
+  const font = px => `bold ${px}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  g.font = font(S * 0.1);
+  g.fillText('Calendar', S / 2, S * 0.12);
+  g.font = font(S * 0.085);
+  g.fillText(`${date}  ${day}`, S / 2, S * 0.315);
+  g.font = font(S * 0.1);
+  g.fillText(time, S / 2, S * 0.775);
+  // only for the right people at the right time
+  const birthday = (d.getMonth() === 8 && d.getDate() === 14) || (d.getMonth() === 10 && d.getDate() === 18);
+  const late = d.getHours() >= 2 && d.getHours() < 5, holiday = holidayOn();
+  const friday13 = d.getDay() === 5 && d.getDate() === 13;
+  const note = birthday ? 'Happy birthday, GameCube' : holiday === 'halloween' ? 'Happy Halloween'
+    : holiday === 'christmas' ? "Merry Christmas. Somebody's pressing power." : holiday === 'aprilfools' ? 'Your free trial of the startup has expired.'
+    : friday13 ? 'Unlucky day to boot.' : late ? "It's late. Go to bed." : '';
+  if (note) {
+    g.font = font(S * 0.045);
+    g.fillStyle = '#c4bbff';
+    g.fillText(note, S / 2, S * 0.93);
+  }
+  calTex.needsUpdate = true;
+}
+drawCalendar(new Date());
+const calMat = new THREE.MeshBasicMaterial({ map: calTex, transparent: true, depthWrite: false, opacity: 0 });
+const cal = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), calMat);
+cal.rotation.y = Math.PI / 2;
+cal.position.x = 0.503;
+cal.renderOrder = 3;
+ghost.add(cal);
+scene.add(ghost);
+
+// ---- per-frame state, fully determined by t ----
+const up = new THREE.Vector3(0, 1, 0), q = new THREE.Quaternion();
+const target = new THREE.Vector3();
+
+// rigid roll about the leading bottom edge
+function tipOver(a, b, angle) {
+  const dir = b.clone().sub(a);
+  q.setFromAxisAngle(new THREE.Vector3().crossVectors(up, dir).normalize(), angle);
+  const offset = new THREE.Vector3(-dir.x * 0.5, 0.5, -dir.z * 0.5).applyQuaternion(q);
+  cube.position.copy(a).addScaledVector(dir, 0.5).add(offset);
+  cube.quaternion.copy(q);
+}
+
+function update(t) {
+  cube.scale.set(1, 1, 1);
+  cube.quaternion.identity();
+
+  const u = (t - ROLL_START) / BEAT;
+  if (t < DROP) {                                      // fall in
+    const f = t / DROP;
+    cube.position.copy(cell(0)).setY(0.5 + 8 * (1 - f * f));
+  } else if (u < 0) {                                  // small bounce after the drop
+    const s = (t - DROP) / (ROLL_START - DROP);
+    cube.position.copy(cell(0)).setY(0.5 + 0.22 * Math.sin(Math.PI * s));
+  } else if (t < ROLL_END) {                           // roll with momentum: never stops, eases over the top, swings into each landing
+    const k = Math.min(N - 1, Math.floor(u));
+    const p = u - k;
+    tipOver(cell(k), cell(k + 1), (Math.PI / 2) * (p + 0.3 * Math.sin(2 * Math.PI * p) / (2 * Math.PI)));
+    cube.position.y += 0.14 * Math.sin(Math.PI * p);   // loose, slightly airborne
+    cube.rotateOnWorldAxis(up, rad(5) * Math.sin(t * 6.5));
+  } else if (t < HOP_END) {                            // hop into the middle, growing into the core
+    const f = clamp((t - ROLL_END) / (HOP_END - ROLL_END));
+    const g = lerp(1, CORE, easeInOut(f));
+    cube.scale.setScalar(g);
+    cube.position.copy(cell(N)).lerp(core.position, easeInOut(f)).setY(0.5 * g + 1.8 * Math.sin(Math.PI * f));
+    q.setFromAxisAngle(new THREE.Vector3(1, 0, 1).normalize(), easeInOut(f) * Math.PI);
+    cube.quaternion.copy(q);
+  } else {                                             // press flat into the 2D square on the chime
+    const s = easeInOut(clamp((t - HOP_END) / (CHIME - HOP_END)));
+    cube.scale.set(CORE, CORE * (1 - 0.98 * s), CORE);
+    cube.position.copy(core.position).setY(0.5 * cube.scale.y);
+  }
+  cube.visible = t < CHIME;
+  if (blooper) blooperCube(t);   // hold B (see "easter eggs")
+
+  // tiles appear on each landing, everything flashes on the chime
+  const chime = t >= CHIME ? Math.exp(-(t - CHIME) * 2.2) : 0;
+  const showTile = (m, age) => {
+    m.visible = age >= 0;
+    if (!m.visible) return;
+    const p = easeOut(clamp(age / 0.12));
+    m.scale.set(0.6 + 0.4 * p, 0.6 + 0.4 * p, 1);
+    m.material.color.copy(TILE).lerp(TILE_LIT, clamp(0.6 * Math.exp(-age * 8) + 0.9 * chime + (t >= CHIME ? 0.2 : 0)));
+  };
+  tiles.forEach((m, i) => showTile(m, t - landTime(i)));
+  showTile(core, t - CHIME);
+  paintSpecial(t);   // rainbow / holiday colours, if any (see "easter eggs")
+
+  // ---- outro: tiles get sucked into a see-through cube, which flies up to the camera ----
+  const w = t - OUT;
+
+  // ---- camera: fixed isometric view, then turns to top-down for the finish ----
+  const c = easeInOut(clamp((t - 3.1) / (CHIME - 3.1))) * (1 - easeInOut(clamp(w / FORM)));  // back to isometric for the outro
+  const az = lerp(rad(45), 0, c);
+  const el = lerp(Math.atan(1 / Math.SQRT2), rad(89.5), c);
+  target.set(0, 0, 0).lerp(new THREE.Vector3(0, 0, 1.2), c);
+  camera.position.set(
+    target.x + 30 * Math.cos(el) * Math.sin(az),
+    target.y + 30 * Math.sin(el),
+    target.z + 30 * Math.cos(el) * Math.cos(az)
+  );
+  camera.lookAt(target);
+  const aspect = innerWidth / innerHeight;
+  const halfH = lerp(Math.max(3.6, 4.4 / aspect), Math.max(4.6, 3.6 / aspect), c);
+  camera.top = halfH; camera.bottom = -halfH;
+  camera.right = halfH * aspect; camera.left = -halfH * aspect;
+  camera.zoom = startupLook.tiny ? lerp(0.3, 1, smoother(clamp((t - OUT) / 1.5))) : 1;   // hold T: tiny startup
+  camera.updateProjectionMatrix();
+
+  // the see-through cube appears and, in one continuous move, spins down while flying up to the
+  // camera, ending with one face square-on to it
+  ghost.visible = w > 0;
+  if (ghost.visible) {
+    const p = smoother(clamp(w / APPROACH));
+    const appear = easeOut(clamp(w / 0.6));
+    const toCam = camera.position.clone().sub(target).normalize();
+    const sway = Math.sin(w * 0.9) * p * p * p;               // slow swivel once it arrives
+    ghost.position.set(0, GHOST / 2, 0).lerp(target.clone().addScaledVector(toCam, 12), p);
+    ghost.scale.setScalar(lerp(GHOST, halfH * 1.25, p) * appear);
+    q.setFromAxisAngle(SPIN_AXIS, rad(540) * (1 - p));
+    ghost.quaternion.copy(camera.quaternion).multiply(turnNow(t)).multiply(q);
+    ghost.rotateOnWorldAxis(toCam, rad(3) * sway);           // swivel around the axis pointing at you
+    if (p >= 1) menuMischief(toCam);                          // pokes, cheats, naps (see "easter eggs")
+    glassMat.uniforms.opacity.value = appear;
+    glassMat.uniforms.time.value = w;
+    labelMat.opacity = cardMat.opacity = calMat.opacity = playMat.opacity = optionsMat.opacity = skylerFace.material.opacity = easeInOut(clamp((w - 1.2) / 1.2));
+    drawCalendar(new Date());
+  }
+
+  // tiles get pulled into the cube wherever it is
+  const gather = [...tiles, core];
+  gather.forEach((m, i) => {
+    const f = easeInOut(clamp((w - (i / gather.length) * 0.3) / (FORM - 0.3)));
+    const home = i < tiles.length ? cell(i) : new THREE.Vector3(0, 0, 0);
+    m.position.copy(home).setY(0.001).lerp(ghost.position, f);
+    m.material.opacity = 1 - f;
+    if (w > 0) m.scale.setScalar(1 - 0.85 * f);
+    if (f >= 1) m.visible = false;
+  });
+
+  const ti = clamp((t - CHIME) / 0.7);
+  const title = document.getElementById('title');
+  const to = 1 - easeInOut(clamp(w / 0.5));
+  title.style.opacity = ti * to;
+  title.style.transform = `translateY(${(1 - easeOut(ti)) * 18}px) scale(${0.85 + 0.15 * to})`;
+  title.classList.toggle('shine', t > CHIME + 0.3);
+}
+
+// ---- clock synced to the audio ----
+// ---- settings, remembered in this browser ----
+const settings = Object.assign({ music: 1, sfx: 1, skipIntro: false, particles: true },
+  (() => { try { return JSON.parse(localStorage.getItem('gamesquare-settings')) || {}; } catch { return {}; } })());
+function saveSettings() { try { localStorage.setItem('gamesquare-settings', JSON.stringify(settings)); } catch {} }
+// every sound effect goes through here so the volume setting applies
+function sfx(el) { const c = el.cloneNode(); c.volume = settings.sfx; c.play().catch(() => {}); }
+
+const audio = document.getElementById('snd');
+let running = false, t0 = 0;
+const freeze = parseFloat(new URLSearchParams(location.search).get('t'));   // ?t=5 freezes on that moment, for previewing
+function now() {
+  if (!isNaN(freeze)) return freeze;
+  if (rewind) return rewindTime();
+  if (!running) return 0;
+  if (!audio.paused && !audio.ended && audio.currentTime > 0) t0 = performance.now() / 1000 - audio.currentTime;
+  return performance.now() / 1000 - t0;
+}
+const whoosh = document.getElementById('whoosh');
+const menu = document.getElementById('menu');
+let whooshed = false, menuStarted = false;
+function play() {
+  whooshed = false;
+  whoosh.pause();
+  running = true;
+  if (settings.skipIntro) {
+    // jump straight to the menu cube, already settled
+    t0 = performance.now() / 1000 - (OUT + APPROACH);
+    whooshed = true;
+    return Promise.resolve();
+  }
+  audio.currentTime = 0;
+  audio.volume = whoosh.volume = settings.sfx;
+  // the whole intro follows the sound's clock, so speeding the sound up speeds everything up
+  audio.playbackRate = fastIntro ? 1.7 : 1;
+  audio.preservesPitch = !fastIntro;
+  t0 = performance.now() / 1000;
+  return audio.play();
+}
+let fastIntro = false;
+// Black until the first click on the page, then the intro starts straight away.
+let waiting = true;
+// holding a key as it starts changes things: S sets off the story, D turns it into Skylersquare,
+// F plays the intro at chipmunk speed (see "the S secret" and "easter eggs" below)
+const kick = () => {
+  if (!waiting) return;
+  waiting = false;
+  if (held.has('s')) return startEgg();
+  if (held.has('g')) return startRewind();
+  if (held.has('d')) skylerMode();
+  if (held.has('r')) rainbowMode();
+  if (held.has('b')) blooper = { done: false };
+  startupLook.mirror = held.has('m');
+  startupLook.flip = held.has('x');
+  startupLook.tiny = held.has('t');
+  startupLook.film = held.has('0');
+  applyStartupLook();
+  fastIntro = held.has('f');
+  play().catch(() => {});
+};
+addEventListener('pointerdown', kick);
+
+// ---- once the menu cube has arrived, arrows / WASD turn it 90 degrees ----
+const turnSnd = document.getElementById('turn');
+const centerSnd = document.getElementById('turnCenter');   // played when a turn brings the logo face back to you
+const TURN_LOCK = 0.8;   // seconds before the next turn: the sounds peak by ~0.6s and their tails can overlap
+const turn = { from: new THREE.Quaternion(), to: new THREE.Quaternion(), at: -1 };
+const TURN_TIME = 0.45;
+const easeOutBack = f => 1 + 2.2 * Math.pow(f - 1, 3) + 1.2 * Math.pow(f - 1, 2);
+function turnNow(t) {
+  const k = turn.at < 0 ? 1 : easeOutBack(clamp((t - turn.at) / TURN_TIME));
+  return turn.from.clone().slerp(turn.to, k);
+}
+// [axis in camera space, direction]: left/right spin around the vertical, up/down around the horizontal
+const TURNS = {
+  arrowleft: [0, 1, 0, 1, 'left'], a: [0, 1, 0, 1, 'left'],
+  arrowright: [0, 1, 0, -1, 'right'], d: [0, 1, 0, -1, 'right'],
+  arrowup: [1, 0, 0, 1, 'up'], w: [1, 0, 0, 1, 'up'],
+  arrowdown: [1, 0, 0, -1, 'down'], s: [1, 0, 0, -1, 'down'],
+};
+// the cube only ever goes one side away from the front: from a side, only the opposite key brings it back
+const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
+let side = null;
+// ---- screens behind the cube: Memory Card slots, and Game Play's console picker + game slots ----
+const cardScene = new THREE.Scene();
+cardScene.background = new THREE.Color(0x000000);
+const cardCam = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+cardCam.position.set(0, 0, 11);
+cardScene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const cardSun = new THREE.DirectionalLight(0xffffff, 0.8);
+cardSun.position.set(4, 6, 8);
+cardScene.add(cardSun);
+
+// grid wall behind everything
+const wall = new THREE.GridHelper(30, 60, 0x4a4466, 0x4a4466);
+wall.rotation.x = Math.PI / 2;
+wall.position.z = -1.2;
+cardScene.add(wall);
+
+const COLS = 4, ROWS = 4, GAP = 1.3;
+const UI_FONT = px => `bold ${px}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+
+// header: title, plus an optional smaller line under it
+const headerCanvas = document.createElement('canvas');
+headerCanvas.width = 1024; headerCanvas.height = 200;
+const headerTex = new THREE.CanvasTexture(headerCanvas);
+let headerShown = '';
+function setHeader(title, subtitle = '') {
+  if (title + '\n' + subtitle === headerShown) return;
+  headerShown = title + '\n' + subtitle;
+  const g = headerCanvas.getContext('2d');
+  g.clearRect(0, 0, 1024, 200);
+  g.textBaseline = 'middle';
+  g.fillStyle = '#f2f2f6';
+  g.font = UI_FONT(84);
+  g.fillText(title, 0, 60);
+  g.fillStyle = 'rgba(220,215,240,.75)';
+  g.font = UI_FONT(42);
+  g.fillText(subtitle, 4, 150);
+  headerTex.needsUpdate = true;
+}
+const header = new THREE.Mesh(new THREE.PlaneGeometry(4, 0.78), new THREE.MeshBasicMaterial({ map: headerTex, transparent: true }));
+header.position.set(-(COLS - 1) * GAP / 2 - 0.45 + 2, (ROWS - 1) * GAP / 2 + 0.92, 0);
+cardScene.add(header);
+
+// button hints along the bottom, e.g. [Enter] ··· Confirm   [Tab] ··· Back
+const hintCanvas = document.createElement('canvas');
+hintCanvas.width = 1536; hintCanvas.height = 128;
+const hintTex = new THREE.CanvasTexture(hintCanvas);
+let hintsShown = '';
+function setHints(pairs) {
+  if (JSON.stringify(pairs) === hintsShown) return;
+  hintsShown = JSON.stringify(pairs);
+  const g = hintCanvas.getContext('2d');
+  const W = hintCanvas.width;
+  g.clearRect(0, 0, W, 128);
+  const measure = S => {
+    g.font = UI_FONT(S * 0.066);
+    return pairs.map(([, action]) => S * 0.31 + g.measureText(action).width);
+  };
+  // shrink everything when three hints won't fit across
+  let S = 900, gap = 70, widths = measure(S);
+  const total = widths.reduce((a, b) => a + b, 0) + gap * (pairs.length - 1);
+  if (total > W - 24) { S *= (W - 24) / total; gap *= (W - 24) / total; widths = measure(S); }
+  let x = (W - widths.reduce((a, b) => a + b, 0) - gap * (pairs.length - 1)) / 2;
+  pairs.forEach(([key, action], i) => { buttonHint(g, x, 64, S, key, action); x += widths[i] + gap; });
+  hintTex.needsUpdate = true;
+}
+const hints = new THREE.Mesh(new THREE.PlaneGeometry(6, 0.5), new THREE.MeshBasicMaterial({ map: hintTex, transparent: true }));
+hints.position.set(0, -(ROWS - 1) * GAP / 2 - 1.15, 0);
+cardScene.add(hints);
+
+// ---- Settings screen: a list of rows drawn onto one panel ----
+const SETTINGS = [
+  { key: 'music', label: 'Music volume', kind: 'volume', help: 'Menu music' },
+  { key: 'sfx', label: 'Sound effects', kind: 'volume', help: 'Startup, turning and menu sounds' },
+  { key: 'skipIntro', label: 'Skip intro', kind: 'toggle', on: 'On', off: 'Off', help: 'Start right at the menu cube' },
+  { key: 'particles', label: 'Screen transitions', kind: 'toggle', on: 'Particles', off: 'Fade', help: 'How screens and games appear' },
+  { key: 'resetLoad', label: 'Loading estimates', kind: 'action', verb: 'Reset', help: 'Forget learned load times and start over' },
+  { key: 'tos', label: 'Terms of Service', kind: 'action', verb: 'Read', help: 'Please read carefully' },
+];
+const settingsCanvas = document.createElement('canvas');
+settingsCanvas.width = 1400; settingsCanvas.height = 900;
+const settingsTex = new THREE.CanvasTexture(settingsCanvas);
+const settingsPanel = new THREE.Mesh(new THREE.PlaneGeometry(7, 4.5), new THREE.MeshBasicMaterial({ map: settingsTex, transparent: true }));
+settingsPanel.position.set(0, -0.35, 0);
+settingsPanel.visible = false;
+cardScene.add(settingsPanel);
+let settingsShown = '', resetDone = 0;
+function drawSettings(sel) {
+  const stamp = JSON.stringify([sel, settings, performance.now() - resetDone < 1500]);
+  if (stamp === settingsShown) return;
+  settingsShown = stamp;
+  const g = settingsCanvas.getContext('2d'), W = settingsCanvas.width, rowH = 140, top = 30;
+  g.clearRect(0, 0, W, settingsCanvas.height);
+  g.textBaseline = 'middle';
+  SETTINGS.forEach((row, i) => {
+    const y = top + i * rowH + rowH / 2, chosen = i === sel;
+    if (chosen) {
+      g.fillStyle = 'rgba(255,180,70,.12)';
+      g.beginPath(); g.roundRect(20, y - rowH / 2 + 12, W - 40, rowH - 24, 22); g.fill();
+      g.fillStyle = '#f2b33a';
+      g.beginPath(); g.roundRect(20, y - rowH / 2 + 12, 10, rowH - 24, 5); g.fill();
+    }
+    g.textAlign = 'left';
+    g.fillStyle = chosen ? '#fff' : 'rgba(230,226,245,.7)';
+    g.font = UI_FONT(52);
+    g.fillText(row.label, 70, y);
+    g.textAlign = 'right';
+    if (row.kind === 'volume') {
+      // ten blocks, lit amber up to the level
+      const level = Math.round(settings[row.key] * 10), size = 42, gap = 10, x0 = W - 70 - 10 * (size + gap) + gap;
+      for (let b = 0; b < 10; b++) {
+        g.fillStyle = b < level ? (chosen ? '#f2b33a' : '#a8803a') : 'rgba(255,255,255,.1)';
+        g.beginPath(); g.roundRect(x0 + b * (size + gap), y - size / 2, size, size, 8); g.fill();
+      }
+    } else {
+      const text = row.kind === 'toggle' ? (settings[row.key] ? row.on : row.off)
+        : row.key === 'resetLoad' && performance.now() - resetDone < 1500 ? 'Done' : row.verb;
+      g.fillStyle = chosen ? '#f2b33a' : 'rgba(230,226,245,.7)';
+      g.font = UI_FONT(50);
+      g.fillText(row.kind === 'toggle' && chosen ? `\u25c0  ${text}  \u25b6` : text, W - 70, y);
+    }
+  });
+  settingsTex.needsUpdate = true;
+}
+// dir: -1 / +1 from left/right, or +1 from Enter
+function changeSetting(i, dir) {
+  const row = SETTINGS[i];
+  if (row.kind === 'volume') {
+    const next = clamp(Math.round(settings[row.key] * 10 + dir) / 10);
+    if (next === settings[row.key]) return;
+    settings[row.key] = next;
+    if (settings.music === 0 && settings.sfx === 0) quip('Silent mode. Very mysterious.');
+    // flipping the music between nothing and everything
+    if (row.key === 'music' && (next === 0 || next === 1) && mischief.flips.at(-1) !== next) {
+      mischief.flips.push(next);
+      if (mischief.flips.length >= 4) { mischief.flips = []; quip('Make up your mind.'); }
+    }
+  } else if (row.kind === 'toggle') {
+    settings[row.key] = !settings[row.key];
+  } else {
+    if (dir < 0) return;
+    if (row.key === 'tos') { playSelect(); openTos(); return; }
+    Object.keys(localStorage).filter(k => k.startsWith('gamesquare-load-')).forEach(k => localStorage.removeItem(k));
+    resetDone = performance.now();
+  }
+  saveSettings();
+  playSelect();   // plays at the new sound-effects volume, so you hear the change
+}
+
+// ---- blocky letters built from little amber cubes, like the GameCube clock ----
+const VOXEL = {
+  P: ['11110', '10001', '10001', '11110', '10000', '10000', '10000'],
+  S: ['01111', '10000', '10000', '01110', '00001', '00001', '11110'],
+  1: ['00100', '01100', '00100', '00100', '00100', '00100', '01110'],
+  N: ['10001', '11001', '10101', '10011', '10001', '10001', '10001'],
+  6: ['00110', '01000', '10000', '11110', '10001', '10001', '01110'],
+  4: ['00010', '00110', '01010', '10010', '11111', '00010', '00010'],
+  M: ['10001', '11011', '10101', '10101', '10001', '10001', '10001'],
+  A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],
+  E: ['11111', '10000', '10000', '11110', '10000', '10000', '11111'],
+  '^': ['0001000', '0011100', '0111110', '1111111', '0011100', '0011100', '0011100'],
+};
+const voxelGeo = roundedBox(1, 0.1, 2);
+const amberOn = new THREE.MeshLambertMaterial({ color: 0xf2b33a, emissive: 0x5a3a00 });
+const amberOff = new THREE.MeshLambertMaterial({ color: 0x6b5330, emissive: 0x140c00 });
+// a group of cubes spelling `text`, centred on its origin, with an invisible box for mouse clicks
+function voxelText(text, step) {
+  const group = new THREE.Group();
+  const cubes = [];
+  let x = 0;
+  for (const ch of text) {
+    const rows = VOXEL[ch];
+    rows.forEach((row, r) => [...row].forEach((bit, c) => {
+      if (bit !== '1') return;
+      const m = new THREE.Mesh(voxelGeo, amberOff);
+      m.scale.setScalar(step * 0.88);
+      m.userData.col = x + c;
+      m.position.set((x + c) * step, (3 - r) * step, 0);
+      group.add(m);
+      cubes.push(m);
+    }));
+    x += rows[0].length + 1;
+  }
+  const width = (x - 1) * step;
+  cubes.forEach(m => (m.position.x -= width / 2 - step / 2));
+  const hit = new THREE.Mesh(new THREE.PlaneGeometry(width + step * 2, step * 9), new THREE.MeshBasicMaterial({ visible: false }));
+  group.add(hit);
+  group.userData = { cubes, hit };
+  return group;
+}
+
+// console picker
+const CONSOLES = [
+  { name: 'PS1', core: 'psx', accept: '.bin,.cue,.iso,.img,.chd,.pbp,.zip' },
+  { name: 'N64', core: 'n64', accept: '.n64,.z64,.v64,.zip' },
+  { name: 'MAME', core: 'mame', accept: '.zip,.7z' },
+  { name: 'SNES', core: 'snes', accept: '.sfc,.smc,.zip' },
+  { name: 'NES', core: 'nes', accept: '.nes,.zip' },
+];
+const consoleWords = CONSOLES.map((con, i) => {
+  const word = voxelText(con.name, 0.11);
+  word.userData.home = new THREE.Vector3(0, (2 - i) * 1.02 - 0.2, 0);
+  word.userData.i = i;
+  cardScene.add(word);
+  return word;
+});
+
+// slots: small glass cubes, same glass as the menu cube; amber once a game is in them
+const slotGeo = roundedBox(1, 0.14, 8);
+const slots = [];
+for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+  const m = new THREE.Mesh(slotGeo, glassMat.clone());
+  m.userData.home = new THREE.Vector3((c - (COLS - 1) / 2) * GAP, ((ROWS - 1) / 2 - r) * GAP - 0.25, 0);
+  m.userData.i = slots.length;
+  // the game's cover floats inside its glass cube
+  const cover = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.72), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+  cover.visible = false;
+  m.add(cover);
+  m.userData.cover = cover;
+  cardScene.add(m);
+  slots.push(m);
+}
+
+// ---- cover art from the libretro thumbnail library, matched by the file's name ----
+const THUMB_REPOS = {
+  PS1: 'Sony_-_PlayStation', N64: 'Nintendo_-_Nintendo_64',
+  SNES: 'Nintendo_-_Super_Nintendo_Entertainment_System', NES: 'Nintendo_-_Nintendo_Entertainment_System',
+};
+const covers = new Map();   // "system/name" -> texture (a fallback label until/unless art loads)
+function gameTitle(file) { return file.name.replace(/\.[^.]+$/, ''); }
+function labelCover(title) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 256;
+  const g = cv.getContext('2d');
+  const bg = g.createLinearGradient(0, 0, 256, 256);
+  bg.addColorStop(0, '#3b2fa0'); bg.addColorStop(1, '#14103a');
+  g.fillStyle = bg;
+  g.fillRect(0, 0, 256, 256);
+  g.fillStyle = '#f2f2f6';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.font = UI_FONT(30);
+  // wrap the title onto up to four lines
+  const words = title.replace(/\s*[([].*$/, '').split(/\s+/), lines = [''];
+  words.forEach(w => {
+    const next = (lines[lines.length - 1] + ' ' + w).trim();
+    if (g.measureText(next).width > 220 && lines[lines.length - 1]) lines.push(w); else lines[lines.length - 1] = next;
+  });
+  lines.slice(0, 4).forEach((l, i, a) => g.fillText(l, 128, 128 + (i - (a.length - 1) / 2) * 36));
+  return new THREE.CanvasTexture(cv);
+}
+function coverFor(system, file) {
+  if (skyler) return skylerTex;   // Skylersquare: every game is Skyler
+  const key = system + '/' + file.name;
+  if (covers.has(key)) return covers.get(key);
+  const tex = labelCover(gameTitle(file));
+  covers.set(key, tex);
+  const repo = THUMB_REPOS[system];
+  if (repo) {
+    // libretro swaps these characters for underscores in its file names
+    const name = encodeURIComponent(gameTitle(file).replace(/[&*/:`<>?\\|"]/g, '_'));
+    const tries = ['Named_Boxarts', 'Named_Titles', 'Named_Snaps']
+      .map(dir => `https://raw.githubusercontent.com/libretro-thumbnails/${repo}/master/${dir}/${name}.png`);
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
+    const next = () => {
+      const url = tries.shift();
+      if (url) loader.load(url, art => { tex.image = art.image; tex.needsUpdate = true; }, undefined, next);
+    };
+    next();
+  }
+  return tex;
+}
+const ARROW = slots.length;     // selection index of the upload arrow
+const arrow = voxelText('^', 0.14);   // upload arrow
+arrow.userData.home = new THREE.Vector3((COLS - 1) / 2 * GAP + 1.55, -0.25, 0);
+cardScene.add(arrow);
+
+// uploaded games, kept in the browser's IndexedDB so they're still there next visit
+const games = Object.fromEntries(CONSOLES.map(c => [c.name, []]));
+// opened at whatever version exists, so an old copy of this page left open in another tab can't block it
+function openStore(name, store, options) {
+  return new Promise(resolve => {
+    try {
+      const req = indexedDB.open(name);
+      req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(store)) req.result.createObjectStore(store, options); };
+      req.onsuccess = () => {
+        req.result.onversionchange = () => req.result.close();
+        resolve(req.result.objectStoreNames.contains(store) ? req.result : null);
+      };
+      req.onerror = req.onblocked = () => resolve(null);
+    } catch { resolve(null); }
+  });
+}
+// games live in 'gamesquare-library'; on first run they're copied over from the older 'gamesquare'
+// database, if that can be opened within a few seconds (a stale tab can hold it locked)
+const gameDB = openStore('gamesquare-library', 'games', { autoIncrement: true }).then(async db => {
+  if (!db) return db;
+  const count = await new Promise(r => {
+    const q = db.transaction('games').objectStore('games').count();
+    q.onsuccess = () => r(q.result);
+    q.onerror = () => r(1);
+  });
+  if (count) return db;
+  const old = await Promise.race([
+    new Promise(r => {
+      try {
+        const q = indexedDB.open('gamesquare');
+        q.onupgradeneeded = () => q.transaction.abort();   // never existed: don't create it
+        q.onsuccess = () => r(q.result);
+        q.onerror = () => r(null);
+      } catch { r(null); }
+    }),
+    new Promise(r => setTimeout(() => r(null), 3000)),
+  ]);
+  if (old && old.objectStoreNames.contains('games')) {
+    const rows = await new Promise(r => {
+      const q = old.transaction('games').objectStore('games').getAll();
+      q.onsuccess = () => r(q.result);
+      q.onerror = () => r([]);
+    });
+    old.close();
+    await new Promise(r => {
+      const tx = db.transaction('games', 'readwrite');
+      rows.forEach(row => tx.objectStore('games').add(row));
+      tx.oncomplete = tx.onerror = tx.onabort = r;
+    });
+  }
+  return db;
+});
+gameDB.then(db => {
+  if (!db) return;
+  // each File remembers its database key in .dbKey, so it can be deleted later
+  const req = db.transaction('games').objectStore('games').openCursor();
+  req.onsuccess = () => {
+    const cursor = req.result;
+    if (!cursor) return;
+    const { system, file } = cursor.value;
+    if (games[system] && games[system].length < slots.length) { file.dbKey = cursor.key; games[system].push(file); }
+    cursor.continue();
+  };
+});
+// shows "Saving…" until the write has fully landed: big discs take a second or two
+let savesPending = 0;
+function saveGame(system, file) {
+  gameDB.then(db => {
+    if (!db) return;
+    try {
+      savesPending++;
+      cardView.busy = 'Saving\u2026';
+      const tx = db.transaction('games', 'readwrite');
+      tx.objectStore('games').add({ system, file }).onsuccess = e => (file.dbKey = e.target.result);
+      tx.oncomplete = tx.onerror = tx.onabort = () => { if (--savesPending === 0) cardView.busy = ''; };
+    } catch { if (--savesPending === 0) cardView.busy = ''; }
+  });
+}
+function deleteGame(system, index) {
+  const [file] = games[system].splice(index, 1);
+  gameDB.then(db => {
+    try { if (db && file.dbKey !== undefined) db.transaction('games', 'readwrite').objectStore('games').delete(file.dbKey); } catch {}
+  });
+}
+
+// PS1 discs come as a .cue plus one or more .bin tracks. A single-track disc is stored as just its .bin
+// (EmulatorJS writes a .cue for it, and that's fastest to load); a multi-track disc is packed into one
+// uncompressed .zip, which EmulatorJS unpacks and then boots from the real .cue
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+// the checksum runs in a worker so a big disc doesn't freeze the page
+const CRC_WORKER = `
+  const T = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  onmessage = async e => {
+    let crc = 0xffffffff;
+    const reader = e.data.stream().getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (let i = 0; i < value.length; i++) crc = T[(crc ^ value[i]) & 0xff] ^ (crc >>> 8);
+    }
+    postMessage((crc ^ 0xffffffff) >>> 0);
+  };`;
+async function crc32(file) {
+  try {
+    const worker = new Worker(URL.createObjectURL(new Blob([CRC_WORKER], { type: 'text/javascript' })));
+    return await new Promise((resolve, reject) => {
+      worker.onmessage = e => { worker.terminate(); resolve(e.data); };
+      worker.onerror = reject;
+      worker.postMessage(file);
+    });
+  } catch {
+    let crc = 0xffffffff;   // no workers: do it here instead
+    const reader = file.stream().getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (let i = 0; i < value.length; i++) crc = CRC_TABLE[(crc ^ value[i]) & 0xff] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+}
+async function storedZip(files) {
+  const parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = new TextEncoder().encode(f.name), crc = await crc32(f);
+    const local = new DataView(new ArrayBuffer(30));
+    [[0, 0x04034b50, 4], [4, 10, 2], [10, 0, 2], [12, 0x21, 2], [14, crc, 4], [18, f.size, 4], [22, f.size, 4], [26, name.length, 2]]
+      .forEach(([at, v, n]) => (n === 4 ? local.setUint32(at, v, true) : local.setUint16(at, v, true)));
+    const dir = new DataView(new ArrayBuffer(46));
+    [[0, 0x02014b50, 4], [4, 20, 2], [6, 10, 2], [14, 0x21, 2], [16, crc, 4], [20, f.size, 4], [24, f.size, 4], [28, name.length, 2], [42, offset, 4]]
+      .forEach(([at, v, n]) => (n === 4 ? dir.setUint32(at, v, true) : dir.setUint16(at, v, true)));
+    parts.push(local, name, f);
+    central.push(dir, name);
+    offset += 30 + name.length + f.size;
+  }
+  const dirSize = central.reduce((sum, p) => sum + p.byteLength, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  [[0, 0x06054b50, 4], [8, files.length, 2], [10, files.length, 2], [12, dirSize, 4], [16, offset, 4]]
+    .forEach(([at, v, n]) => (n === 4 ? end.setUint32(at, v, true) : end.setUint16(at, v, true)));
+  return new Blob([...parts, ...central, end]);
+}
+// turn the picked files into games: each .cue becomes one game with the .bin files it lists
+async function ps1Games(files) {
+  const ext = f => f.name.split('.').pop().toLowerCase();
+  const cues = files.filter(f => ext(f) === 'cue');
+  const bins = files.filter(f => ext(f) === 'bin');
+  const out = files.filter(f => !['cue', 'bin'].includes(ext(f)));   // .iso, .chd, .pbp... work alone
+  for (const cue of cues) {
+    const wanted = [...(await cue.text()).matchAll(/FILE\s+"?([^"\r\n]+?)"?\s+BINARY/gi)].map(m => m[1].toLowerCase());
+    const tracks = cues.length === 1 ? bins : bins.filter(b => wanted.includes(b.name.toLowerCase()));
+    if (!tracks.length) continue;
+    if (tracks.length === 1) { out.push(tracks[0]); continue; }
+    const zip = await storedZip([cue, ...tracks]);
+    out.push(new File([zip], cue.name.replace(/\.cue$/i, '') + '.zip'));
+  }
+  if (!cues.length) out.push(...bins);   // a lone .bin still boots; EmulatorJS writes a .cue for it
+  return out;
+}
+
+const romInput = document.createElement('input');
+romInput.type = 'file';
+romInput.multiple = true;
+romInput.style.display = 'none';
+document.body.appendChild(romInput);
+romInput.addEventListener('change', async () => {
+  const system = cardView.console.name, list = games[system];
+  let picked = [...romInput.files];
+  romInput.value = '';
+  if (system === 'PS1') {
+    cardView.busy = 'Packing disc…';
+    picked = await ps1Games(picked);
+    cardView.busy = '';
+  }
+  if (system === 'MAME') {
+    cardView.busy = 'Packing ROM set…';
+    picked = await mameGames(picked);
+    cardView.busy = '';
+  }
+  picked.forEach(f => {
+    if (list.length < slots.length) { list.push(f); saveGame(system, f); }
+  });
+  cardView.sel = Math.max(0, list.length - 1);
+  cardView.selAt = performance.now() / 1000;
+});
+function upload() {
+  // MAME games are folders of chip dumps, so MAME picks folders; everything else picks files
+  romInput.webkitdirectory = cardView.console.name === 'MAME';
+  romInput.accept = cardView.console.accept;
+  romInput.click();
+}
+// MAME wants each game as a .zip named after the game ("sf2.zip"). Every picked folder that holds files
+// becomes one stored zip named after that folder; any .zip/.7z already in there is used as it is.
+async function mameGames(files) {
+  const folders = new Map(), out = [];
+  for (const f of files) {
+    if (f.name.startsWith('.')) continue;   // .DS_Store and friends
+    if (/\.(zip|7z)$/i.test(f.name)) { out.push(f); continue; }
+    const parts = (f.webkitRelativePath || f.name).split('/');
+    const folder = parts.length > 1 ? parts[parts.length - 2] : 'game';
+    if (!folders.has(folder)) folders.set(folder, []);
+    folders.get(folder).push(f);
+  }
+  for (const [folder, parts] of folders) out.push(new File([await storedZip(parts)], folder + '.zip'));
+  return out;
+}
+
+// ---- playing: EmulatorJS runs the game in a full-screen frame over everything ----
+// EmulatorJS 4.2.3 and the five cores live in the emulatorjs/ folder next to this page
+const EJS_DATA = new URL('emulatorjs/', location.href).href;
+const emuBox = document.getElementById('emu');
+// the frame waits for the game file by postMessage (so it arrives as the frame's own File), then loads EmulatorJS
+const EMU_PAGE = `<!doctype html><html><head><meta charset="utf-8">
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}#game{width:100%;height:100%}</style></head>
+<body><div id="game"></div><script>
+addEventListener('message', e => {
+  const { file, core } = e.data;
+  window.EJS_player = '#game';
+  window.EJS_core = core;
+  window.EJS_gameUrl = file;
+  window.EJS_gameName = file.name.replace(/\.[^.]+$/, '');
+  window.EJS_pathtodata = '${EJS_DATA}';
+  window.EJS_startOnLoaded = true;
+  window.EJS_color = '#7a6cf0';
+  window.EJS_backgroundColor = '#000';
+  // keep each drawn frame readable so the brightness probe below can sample it
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (type, attrs) {
+    if (/webgl/.test(type)) attrs = Object.assign({}, attrs, { preserveDrawingBuffer: true });
+    return getContext.call(this, type, attrs);
+  };
+  const s = document.createElement('script');
+  s.src = '${EJS_DATA}loader.js';
+  document.body.appendChild(s);
+  // how bright the game screen is (0-255), so the loading screen can wait for a real picture,
+  // not just the black boot
+  const probe = document.createElement('canvas');
+  probe.width = probe.height = 16;
+  const pg = probe.getContext('2d', { willReadFrequently: true });
+  let n = 0;
+  (function sample() {
+    const c = window.EJS_emulator && EJS_emulator.canvas;
+    if (c && c.width && ++n % 10 === 0) {
+      try {
+        pg.drawImage(c, 0, 0, 16, 16);
+        const d = pg.getImageData(0, 0, 16, 16).data;
+        let sum = 0;
+        for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+        window.screenLevel = sum / (d.length / 4) / 3;
+      } catch (e) {}
+    }
+    if (!window.gameShown) requestAnimationFrame(sample);
+  })();
+}, { once: true });
+<\/script></body></html>`;
+// load-time estimate per system: a fixed start-up cost plus seconds per MB, learned from real loads
+const LOAD_DEFAULTS = { psx: [4, 0.0135], n64: [6, 0.02], mame: [5, 0.02], snes: [4, 0.02], nes: [4, 0.02] };
+function loadModel(core) {
+  try { return JSON.parse(localStorage.getItem('gamesquare-load-' + core)) || LOAD_DEFAULTS[core]; } catch { return LOAD_DEFAULTS[core]; }
+}
+function learnLoad(core, mb, seconds) {
+  const [base, perMB] = loadModel(core);
+  const model = mb > 20 ? [base, Math.max(0, (seconds - base) / mb)] : [Math.max(1, seconds - mb * perMB), perMB];
+  try { localStorage.setItem('gamesquare-load-' + core, JSON.stringify(model)); } catch {}
+}
+let loadTimer = 0;
+function showLoading(frame, file, core) {
+  const box = document.getElementById('loading'), fill = document.getElementById('ldFill'), text = document.getElementById('ldText');
+  const mb = file.size / 1048576, [base, perMB] = loadModel(core), estimate = base + mb * perMB;
+  const t0 = performance.now();
+  let startedAt = 0;
+  document.getElementById('ldName').textContent = gameTitle(file);
+  box.classList.remove('done');
+  const finish = learn => {
+    clearInterval(loadTimer);
+    try { frame.contentWindow.gameShown = true; } catch {}
+    fill.style.width = '100%';
+    box.classList.add('done');
+    chunkIn();   // the game's picture arrives in chunks
+    if (learn) learnLoad(core, mb, (performance.now() - t0) / 1000);
+  };
+  box.onclick = () => finish(false);   // clicking the loading screen shows whatever the emulator has
+  clearInterval(loadTimer);
+  loadTimer = setInterval(() => {
+    const elapsed = (performance.now() - t0) / 1000;
+    let E = null, level = 0;
+    try { E = frame.contentWindow.EJS_emulator; level = frame.contentWindow.screenLevel || 0; } catch {}
+    if (E && E.failedToStart) {
+      clearInterval(loadTimer);
+      text.textContent = "This game couldn't start: " + ((E.textElem && E.textElem.innerText) || 'unknown error');
+      return;
+    }
+    if (!E && elapsed > 15) {
+      // browsers won't let a page opened straight from a file load the emulator's files
+      text.textContent = location.protocol === 'file:'
+        ? 'Games need the site running: double-click \u201cOpen Gamesquare\u201d in the gamecube-intro folder.'
+        : "Can't load the emulator: the emulatorjs folder is missing next to index.html.";
+      return;
+    }
+    if (E && E.started && !startedAt) startedAt = elapsed;
+    // done once the game shows a real picture, or after it's been running a while (some start dark)
+    if (startedAt && level > 6) return finish(true);
+    if (startedAt && elapsed - startedAt > 8) return finish(false);
+    fill.style.width = Math.min(96, elapsed / estimate * 100) + '%';
+    const left = Math.ceil(estimate - elapsed);
+    if (left > 1) text.textContent = `Loading \u00b7 about ${left} seconds left`;
+    else {
+      // past the estimate: say what the emulator is actually doing
+      const status = E && E.textElem && E.textElem.innerText.trim();
+      text.textContent = status && !startedAt ? status : 'Loading \u00b7 almost there';
+    }
+  }, 200);
+}
+// ---- Memory Card: each game's in-game save, kept in IndexedDB as { title, system, ext, data, updated } ----
+// A deleted save stays as { title, deleted: true } until that game next runs, so its old file gets wiped too.
+let saves = [];
+const liveSaves = () => saves.filter(sv => !sv.deleted);
+const saveDB = openStore('gamesquare-saves', 'saves', { keyPath: 'title' });
+saveDB.then(db => {
+  if (!db) return;
+  const req = db.transaction('saves').objectStore('saves').getAll();
+  req.onsuccess = () => { saves = req.result.concat(saves.filter(sv => !req.result.some(r => r.title === sv.title))); sortSaves(); };
+});
+function sortSaves() { saves.sort((a, b) => (b.updated || 0) - (a.updated || 0)); }
+function putSave(rec) {
+  saves = saves.filter(sv => sv.title !== rec.title).concat(rec);
+  sortSaves();
+  saveDB.then(db => { try { if (db) db.transaction('saves', 'readwrite').objectStore('saves').put(rec); } catch {} });
+}
+function forgetSave(title) {
+  saves = saves.filter(sv => sv.title !== title);
+  saveDB.then(db => { try { if (db) db.transaction('saves', 'readwrite').objectStore('saves').delete(title); } catch {} });
+}
+function bytesSig(data) {
+  let h = 2166136261;
+  for (let i = 0; i < data.length; i++) h = Math.imul(h ^ data[i], 16777619);
+  return data.length + ':' + (h >>> 0);
+}
+
+// while a game runs: put its stored save in place once it has started, then copy any new save out every few seconds
+let saveTimer = 0, pullSave = () => {};
+function syncSaves(frame, title, system) {
+  let applied = false, lastSig = '', ticks = 0;
+  const manager = () => {
+    try { const E = frame.contentWindow.EJS_emulator; return E && E.started ? E.gameManager : null; } catch { return null; }
+  };
+  pullSave = () => {
+    const gm = manager();
+    if (!gm || !applied) return;
+    try {
+      const data = gm.getSaveFile();
+      if (!data || !data.length || !data.some(b => b)) return;   // nothing saved yet (all blank)
+      const sig = bytesSig(data);
+      if (sig === lastSig) return;
+      lastSig = sig;
+      const ext = '.' + gm.getSaveFilePath().split('.').pop();
+      putSave({ title, system, ext, data: new Blob([data]), updated: Date.now() });
+    } catch {}
+  };
+  clearInterval(saveTimer);
+  saveTimer = setInterval(async () => {
+    const gm = manager();
+    if (!gm) return;
+    if (!applied) {
+      applied = true;
+      const rec = saves.find(sv => sv.title === title), path = gm.getSaveFilePath();
+      try {
+        if (rec && rec.deleted) {
+          // blank the emulator's own copy too (removing the file would leave the old data loaded)
+          const old = gm.getSaveFile(false);
+          if (old && old.length) {
+            gm.FS.writeFile(path, new Uint8Array(old.length));
+            gm.loadSaveFiles();
+          }
+          forgetSave(title);
+        } else if (rec) {
+          const bytes = new Uint8Array(await rec.data.arrayBuffer());
+          gm.FS.mkdirTree(path.slice(0, path.lastIndexOf('/')));
+          gm.FS.writeFile(path, bytes);
+          gm.loadSaveFiles();
+          lastSig = bytesSig(bytes);
+        }
+      } catch {}
+      return;
+    }
+    if (++ticks % 5 === 0) pullSave();
+  }, 1000);
+}
+
+function playGame(file, core) {
+  const frame = document.createElement('iframe');
+  frame.allow = 'fullscreen; gamepad; autoplay';
+  frame.srcdoc = EMU_PAGE;
+  frame.onload = () => { frame.contentWindow.postMessage({ file, core }, '*'); frame.focus(); };
+  emuBox.querySelector('iframe')?.remove();
+  emuBox.prepend(frame);
+  emuBox.classList.add('on');
+  showLoading(frame, file, core);
+  chunkIn();   // so does the loading screen
+  syncSaves(frame, gameTitle(file), CONSOLES.find(c => c.core === core).name);
+  menu.pause();
+}
+function closeGame() {
+  pullSave();   // grab the latest save before the game goes away
+  clearInterval(saveTimer);
+  clearInterval(loadTimer);
+  emuBox.classList.remove('on');
+  emuBox.querySelector('iframe')?.remove();
+  menu.play().catch(() => {});
+}
+document.getElementById('emuClose').addEventListener('click', closeGame);
+
+// mode: null (cube), 'consoles', or 'slots' (console set for Game Play slots, null for Memory Card)
+const cardView = { open: false, mode: null, console: null, at: 0, sel: 0, selAt: 0, row: 0, busy: '', armed: -1, armedAt: 0 };
+// what's in the slots right now: a system's games, or (no system) the Memory Card's saves
+function viewItems() {
+  if (cardView.mode !== 'slots') return [];
+  if (cardView.console) return games[cardView.console.name].map(file => ({ name: file.name, system: cardView.console.name, file }));
+  return liveSaves().map(save => ({ name: save.title + (save.ext || '.sav'), system: save.system, save }));
+}
+
+// save files in and out of the Memory Card
+const SAVE_EXT = { mcr: 'PS1', mcd: 'PS1', mc: 'PS1', gme: 'PS1', eep: 'N64', sra: 'N64', fla: 'N64', mpk: 'N64' };
+const saveInput = document.createElement('input');
+saveInput.type = 'file';
+saveInput.multiple = true;
+saveInput.accept = '.srm,.sav,' + Object.keys(SAVE_EXT).map(e => '.' + e).join(',');
+saveInput.style.display = 'none';
+document.body.appendChild(saveInput);
+saveInput.addEventListener('change', () => {
+  [...saveInput.files].forEach(f => {
+    // a save belongs to the game with the same name; otherwise guess the system from the file type
+    const title = gameTitle(f), ext = '.' + f.name.split('.').pop().toLowerCase();
+    const owner = Object.keys(games).find(sys => games[sys].some(g => gameTitle(g).toLowerCase() === title.toLowerCase()));
+    putSave({ title, system: owner || SAVE_EXT[ext.slice(1)] || '\u2014', ext, data: f, updated: Date.now() });
+  });
+  saveInput.value = '';
+  select(0);
+});
+function downloadSave(save) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(save.data);
+  a.download = save.title + (save.ext || '.sav');
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const AMBER = new THREE.Color(0xffb347), VIOLET = new THREE.Color(0x9d8cff);
+const SLOT_MOVES = { arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0], arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1] };
+
+function updateCard(time) {
+  const age = time - cardView.at;
+  const grow = easeOut(clamp((time - cardView.selAt) / 0.25));
+  const picking = cardView.mode === 'consoles';
+
+  consoleWords.forEach(word => {
+    word.visible = picking;
+    if (!picking) return;
+    const i = word.userData.i, chosen = i === cardView.sel;
+    word.scale.setScalar(Math.max(0.001, easeOutBack(clamp((age - i * 0.06) / 0.45))) * (chosen ? lerp(1, 1.15, grow) : 1));
+    word.position.copy(word.userData.home).setZ(chosen ? 0.4 * grow : 0);
+    word.userData.cubes.forEach(m => {
+      m.material = chosen ? amberOn : amberOff;
+      m.position.z = chosen ? 0.06 * Math.sin(time * 3 - m.userData.col * 0.45) : 0;
+    });
+  });
+
+  const list = viewItems();
+  slots.forEach(m => {
+    m.visible = cardView.mode === 'slots';
+    if (!m.visible) return;
+    const i = m.userData.i, chosen = i === cardView.sel;
+    const pop = easeOutBack(clamp((age - i * 0.03) / 0.45));
+    const size = 0.8 * pop * (chosen ? lerp(1, 1.4, grow) : 1);
+    m.scale.setScalar(Math.max(size, 0.001));
+    m.position.copy(m.userData.home).setZ(chosen ? 0.5 * grow : 0);
+    m.rotation.set(0.25 + 0.06 * Math.sin(time * 0.8 + i), -0.3 + (chosen ? time * 0.6 : 0.06 * Math.sin(time * 0.7 + i * 1.7)), 0);
+    m.material.uniforms.opacity.value = chosen ? 1.25 : 0.75;
+    m.material.uniforms.time.value = chosen ? time : 0;
+    m.material.uniforms.tint.value.copy(i < list.length ? AMBER : VIOLET);
+    const cover = m.userData.cover;
+    cover.visible = i < list.length;
+    if (cover.visible && cover.material.map !== coverFor(list[i].system, list[i])) {
+      cover.material.map = coverFor(list[i].system, list[i]);
+      cover.material.needsUpdate = true;
+    }
+    if (cover.visible) {   // keep the art's own proportions
+      const img = cover.material.map.image, aspect = img.width / img.height || 1;
+      cover.scale.set(Math.min(1, aspect), Math.min(1, 1 / aspect), 1);
+    }
+  });
+
+  arrow.visible = cardView.mode === 'slots';
+  if (arrow.visible) {
+    const chosen = cardView.sel === ARROW;
+    arrow.scale.setScalar(Math.max(0.001, easeOutBack(clamp((age - 0.4) / 0.45))) * (chosen ? lerp(1, 1.2, grow) : 1));
+    arrow.position.copy(arrow.userData.home).setY(arrow.userData.home.y + (chosen ? 0.12 * Math.sin(time * 4) : 0));
+    arrow.userData.cubes.forEach(m => (m.material = chosen ? amberOn : amberOff));
+  }
+
+  settingsPanel.visible = cardView.mode === 'settings';
+  if (settingsPanel.visible) {
+    drawSettings(cardView.sel);
+    settingsPanel.material.opacity = clamp(age / 0.4);
+    const action = SETTINGS[cardView.sel].kind === 'action';
+    setHeader('Settings', SETTINGS[cardView.sel].help);
+    setHints(action ? [['Enter', SETTINGS[cardView.sel].verb], ['Tab', 'Back']] : [['\u2190 \u2192', 'Change'], ['Tab', 'Back']]);
+    header.material.opacity = hints.material.opacity = clamp(age / 0.4);
+    return;
+  }
+
+  // header and hints for what's on screen
+  if (picking) {
+    setHeader('Game Play', 'Choose a system');
+    setHints([['Enter', 'Confirm'], ['Tab', 'Back']]);
+  } else if (cardView.console) {
+    const sel = cardView.sel;
+    const upHint = { PS1: 'Pick the .cue and .bin files together', MAME: "Pick the game's ROM folder" }[cardView.console.name] || 'Upload a game';
+    const armed = cardView.armed === sel && performance.now() / 1000 - cardView.armedAt < 3;
+    const sub = cardView.busy || (sel === ARROW ? upHint : armed ? 'Press Delete again to remove'
+      : sel < list.length ? list[sel].name.replace(/\.[^.]+$/, '') : 'Empty');
+    setHeader(cardView.console.name, sub);
+    setHints(sel === ARROW ? [['Enter', 'Upload'], ['Tab', 'Back']]
+      : sel < list.length ? [['Enter', 'Play'], ['Delete', 'Remove'], ['Tab', 'Back']] : [['Tab', 'Back']]);
+  } else {
+    const sel = cardView.sel, item = list[sel];
+    const armed = cardView.armed === sel && performance.now() / 1000 - cardView.armedAt < 3;
+    const when = item && new Date(item.save.updated).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    setHeader('Memory Card', sel === ARROW ? 'Upload a save file' : armed ? 'Press Delete again to remove'
+      : item ? `${item.save.title} \u00b7 ${item.system} \u00b7 ${when}` : liveSaves().length ? 'Empty' : 'No saves yet: they appear here after you save in a game');
+    setHints(sel === ARROW ? [['Enter', 'Upload'], ['Tab', 'Back']]
+      : item ? [['Enter', 'Download'], ['Delete', 'Remove'], ['Tab', 'Back']] : [['Tab', 'Back']]);
+  }
+  header.material.opacity = hints.material.opacity = clamp(age / 0.4);
+}
+
+const fade = document.getElementById('fade');
+// fade through black, then switch screens: mode null goes back to the cube
+function swapScreen(mode, con = null, sel = 0) {
+  fade.style.opacity = 1;
+  setTimeout(() => {
+    Object.assign(cardView, { open: !!mode, mode, console: con, sel, row: 0 });
+    cardView.at = cardView.selAt = performance.now() / 1000;
+    if (mode) chunkIn();   // screens arrive block by block; going back to the cube just fades
+    fade.style.opacity = 0;
+  }, 350);
+}
+
+// the new screen comes in in chunks, like a picture being received: black blocks drop away
+// from the middle outwards in a scattered order, each one flashing violet as it clears
+const chunkCanvas = document.getElementById('chunks'), chunkCtx = chunkCanvas.getContext('2d');
+let chunkAnim = 0;
+function chunkIn() {
+  if (!settings.particles) return;
+  const size = 26, W = chunkCanvas.width = innerWidth, H = chunkCanvas.height = innerHeight;
+  const cols = Math.ceil(W / size), rows = Math.ceil(H / size), cells = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const d = Math.hypot((c + 0.5) / cols - 0.5, (r + 0.5) / rows - 0.5) / 0.71;
+    cells.push([c * size, r * size, 0.05 + 0.45 * d + 0.4 * Math.random()]);
+  }
+  const t0 = performance.now();
+  cancelAnimationFrame(chunkAnim);
+  (function draw() {
+    const e = (performance.now() - t0) / 1000;
+    let left = false;
+    chunkCtx.clearRect(0, 0, W, H);
+    for (const [x, y, at] of cells) {
+      const k = clamp((e - at) / 0.14);   // 0 = still black, 1 = cleared
+      if (k >= 1) continue;
+      left = true;
+      chunkCtx.fillStyle = `rgba(0,0,0,${1 - k})`;
+      chunkCtx.fillRect(x, y, size, size);
+      if (k > 0) {
+        chunkCtx.fillStyle = `rgba(160,140,255,${0.5 * Math.sin(Math.PI * k)})`;
+        chunkCtx.fillRect(x + 1, y + 1, size - 2, size - 2);
+      }
+    }
+    if (left) chunkAnim = requestAnimationFrame(draw);
+  })();
+}
+const selectSnd = document.getElementById('selectSnd');
+const playSelect = () => sfx(selectSnd);
+const hoverSnd = document.getElementById('hoverSnd');
+function select(i) {
+  if (i === cardView.sel) return;
+  if (cardView.mode === 'consoles' || cardView.mode === 'settings') sfx(hoverSnd);   // moving between emulators / settings
+  cardView.sel = i;
+  cardView.armed = -1;
+  cardView.selAt = performance.now() / 1000;
+}
+function goBack() {
+  if (cardView.mode === 'slots' && cardView.console) swapScreen('consoles', null, CONSOLES.indexOf(cardView.console));
+  else swapScreen(null);
+}
+function choose() {
+  const item = cardView.mode === 'slots' ? viewItems()[cardView.sel] : null;
+  if (item && item.save) sfx(hoverSnd);   // a Memory Card block uses the hover sound
+  else if (cardView.mode === 'consoles' || cardView.sel === ARROW || item) playSelect();
+  if (cardView.mode === 'consoles') swapScreen('slots', CONSOLES[cardView.sel]);
+  else if (cardView.mode === 'slots' && cardView.sel === ARROW) cardView.console ? upload() : saveInput.click();
+  else if (cardView.mode === 'slots') {
+    if (item && item.file) playGame(item.file, cardView.console.core);
+    if (item && item.save) downloadSave(item.save);
+  }
+}
+
+// clicking: pick a system, a slot, or the arrow
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+// pointing at an emulator in the picker selects it
+addEventListener('pointermove', e => {
+  if (cardView.mode !== 'consoles' || emuBox.classList.contains('on')) return;
+  mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(mouse, cardCam);
+  const hit = consoleWords.find(w => ray.intersectObject(w.userData.hit).length);
+  if (hit) select(hit.userData.i);
+});
+addEventListener('click', e => {
+  if (!cardView.open || cardView.mode === 'settings' || emuBox.classList.contains('on')) return;
+  mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(mouse, cardCam);
+  if (cardView.mode === 'consoles') {
+    const hit = consoleWords.find(w => ray.intersectObject(w.userData.hit).length);
+    if (hit) { select(hit.userData.i); choose(); }
+  } else if (arrow.visible && ray.intersectObject(arrow.userData.hit).length) {
+    select(ARROW); choose();
+  } else {
+    const hit = ray.intersectObjects(slots)[0];
+    if (hit && hit.object.userData.i === cardView.sel) choose();   // clicking the selected game plays it
+    else if (hit) select(hit.object.userData.i);
+  }
+});
+
+addEventListener('keydown', e => {
+  if (waiting) return kick();
+  if (egg.active) { if (e.key === 'Escape') endEgg(); return; }   // Esc skips the secret
+  if (tosOpen) { tosKey(e); return; }
+  if (emuBox.classList.contains('on')) return;   // the game has the keyboard
+  const key = e.key.toLowerCase();
+  if (cardView.open) {
+    if (key === 'tab' || key === 'escape') { e.preventDefault(); goBack(); return; }
+    if (key === 'delete' || key === 'backspace') {
+      // remove the selected game: first press asks, a second press within 3s deletes it
+      e.preventDefault();
+      const items = viewItems();
+      if (cardView.mode === 'slots' && !e.repeat && cardView.sel < ARROW && cardView.sel >= items.length && ++mischief.emptyDeletes === 5) {
+        mischief.emptyDeletes = 0;
+        quip("You can't delete nothing. Believe me, I've tried.");
+      }
+      if (cardView.mode !== 'slots' || e.repeat || cardView.sel >= items.length) return;
+      const now = performance.now() / 1000;
+      if (cardView.armed === cardView.sel && now - cardView.armedAt < 3) {
+        if (cardView.console) deleteGame(cardView.console.name, cardView.sel);
+        else putSave({ title: items[cardView.sel].save.title, deleted: true, updated: 0 });
+        cardView.armed = -1;
+        cardView.selAt = now;
+      } else {
+        cardView.armed = cardView.sel;
+        cardView.armedAt = now;
+      }
+      return;
+    }
+    if (cardView.mode === 'settings') {
+      const mv = SLOT_MOVES[key];
+      if (key === 'enter' && !e.repeat) { e.preventDefault(); changeSetting(cardView.sel, 1); }
+      else if (mv && !e.repeat) {
+        e.preventDefault();
+        if (mv[1]) select(clamp(cardView.sel + mv[1], 0, SETTINGS.length - 1));
+        else changeSetting(cardView.sel, mv[0]);
+      }
+      return;
+    }
+    if (key === 'enter') { e.preventDefault(); if (!e.repeat) choose(); return; }
+    const mv = SLOT_MOVES[key];
+    if (!mv || e.repeat) return;
+    e.preventDefault();
+    if (cardView.mode === 'consoles') {
+      const next = cardView.sel + mv[1];
+      if (next < 0 && ++mischief.topBumps === 5) { mischief.topBumps = 0; quip("There's nothing above PS1. We checked."); }
+      if (next >= CONSOLES.length && ++mischief.bottomBumps === 5) { mischief.bottomBumps = 0; quip('Below NES is just more NES.'); }
+      select(clamp(next, 0, CONSOLES.length - 1));
+    } else if (cardView.sel === ARROW) {
+      if (mv[0] < 0) select(cardView.row * COLS + COLS - 1);
+    } else {
+      const c0 = cardView.sel % COLS, r0 = Math.floor(cardView.sel / COLS);
+      if (mv[0] > 0 && c0 === COLS - 1) { cardView.row = r0; select(ARROW); return; }
+      select(clamp(r0 + mv[1], 0, ROWS - 1) * COLS + clamp(c0 + mv[0], 0, COLS - 1));
+    }
+    return;
+  }
+  const t = now();
+  if (key === 'enter') {
+    // only from the Memory Card or Game Play side, once the cube has settled there
+    const settled = turn.at < 0 || t - turn.at > TURN_TIME;
+    if (t >= OUT + APPROACH && settled && !e.repeat) {
+      if (side === 'down' || side === 'up' || side === 'left') playSelect();
+      if (side === 'right') quip("There's nothing to schedule. There is only the startup.");
+      if (side === 'down') swapScreen('slots');
+      if (side === 'up') swapScreen('consoles');
+      if (side === 'left') swapScreen('settings');
+    }
+    return;
+  }
+  const dir = TURNS[key];
+  if (!dir) return;
+  e.preventDefault();
+  if (e.repeat || t < OUT + APPROACH) return;
+  if (turn.at >= 0 && t - turn.at < TURN_LOCK) return;
+  if (side && dir[4] !== OPPOSITE[side]) return;
+  side = side ? null : dir[4];
+  turn.from.copy(turnNow(t));
+  turn.to.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(dir[0], dir[1], dir[2]), dir[3] * Math.PI / 2));
+  turn.at = t;
+  sfx(side ? turnSnd : centerSnd);
+});
+
+// ======================= the S secret =======================
+// Hold S as the intro starts: the cube stops, stares at you, jumpscares, then "3 days later" it drives
+// home down a menu-style road and chats with its block wife in menu noises. Then the normal intro plays.
+const egg = { active: false, start: 0, frozen: false, scared: false, music: false, line: -1, drone: null, audio: null };
+const EGG_FREEZE = ROLL_START + 5 * BEAT;   // stops right as it lands on a beat
+// A scene's script: [who, line, seconds, cue]. `who` speaks `line` as a caption; a cue names something that
+// happens on that beat (the scene's pose function reads cues to time its animation).
+function script(beats) {
+  let t = 0;
+  const out = beats.map(([who, text, dur, cue]) => { const b = { who, text, dur, cue, at: t }; t += dur; return b; });
+  out.total = t;
+  out.cue = name => out.find(b => b.cue === name);
+  return out;
+}
+const OFFICE = script([
+  [null, null, 0.6],
+  ['Boss', "You're late.", 2.6],
+  ['Cube', 'Startup took a while.', 2.8],
+  ['Boss', 'Startup takes four seconds.', 3],
+  ['Cube', 'Not if you do it right.', 2.8],
+  ['Boss', "Don't make me come back here.", 2.8, 'leave'],
+  [null, null, 2],
+  ['Coworker', 'Did you do the roll again this morning?', 3.2],
+  ['Cube', '...No.', 2.2],
+  ['Coworker', 'There are tiles in the parking lot.', 3],
+  ['Cube', "Those could be anyone's tiles.", 3],
+  [null, null, 2.5, 'twitch'],
+  ['Cube', 'I just need one roll.', 2.6],
+  ['Coworker', "Don't. You. Dare.", 2.4],
+  [null, null, 3.6, 'roll'],
+  ['Boss', 'Is that... the logo?', 2.8, 'return'],
+  ['Cube', "It's not finished.", 2.4],
+  ['Boss', 'Clean out your desk.', 3],
+  ['Cube', 'Can I at least do the chime?', 3],
+  ['Boss', 'OUT.', 2.2, 'shake'],
+  [null, null, 0.8],
+]);
+const HOME = script([
+  [null, null, 0.8],
+  ['Wife', "Where's the car?", 2.6],
+  ['Cube', 'Voxels.', 2.2],
+  ['Wife', '...Again?', 2.2],
+  ['Wife', 'And why did you roll in?', 2.8],
+  ['Cube', 'Habit.', 2],
+  ['Wife', "You're home early.", 2.4],
+  ['Cube', 'They let me go.', 2.4],
+  ['Wife', 'You did the startup at work.', 3],
+  ['Cube', "Half a startup. That's barely a boot.", 3],
+  ['Wife', 'We talked about this.', 2.4],
+  ['Wife', "You're a cube. You're not a startup.", 3],
+  ['Cube', 'Every time I roll, millions of people feel joy.', 3.2],
+  ['Wife', 'For four seconds. Then they press A and forget you.', 3.4],
+  ['Cube', "...That's the beauty of it.", 3],
+  ['Wife', "You did it at your mother's funeral.", 3],
+  ['Cube', 'She would have wanted the chime.', 3],
+  ['Wife', "And you hold S every morning. You think I can't hear it.", 3.6],
+  ['Cube', "That's private.", 2.4],
+  [null, null, 2, 'baby'],
+  ['Baby', '[tiny startup noises]', 2.6, 'babyroll'],
+  ['Wife', 'No. No no no. Not you too.', 3],
+  ['Wife', "That's it. I'm calling Dr. Memory Card.", 3],
+  [null, null, 1.4, 'doorbell'],
+  ['Dr', "Hello. I'm a Memory Card. 59 blocks.", 3.2, 'doctor'],
+  ['Dr', "I've seen this before. Cubes who can't stop booting.", 3.4],
+  ['Dr', 'Tell me about your first time.', 2.8],
+  ['Cube', 'Christmas, 2001. Somebody pressed power.', 3.2],
+  ['Cube', 'The lights went purple. I rolled. The whole room went quiet.', 3.8],
+  ['Cube', "I've been chasing that roll ever since.", 3.2],
+  ['Wife', 'He practices on the ceiling.', 2.8],
+  ['Dr', 'Repeat after me. "I am not the startup."', 3],
+  ['Cube', 'I am not the start—', 1.6],
+  [null, null, 2.8, 'relapse'],
+  ['Dr', '...Interesting.', 2.4],
+  ['Dr', 'Has he tried the Wii?', 2.6],
+  ['Wife', "Don't you DARE say that name in this house.", 3.2],
+  ['Dr', "Then there's only one treatment.", 2.8],
+  ['Dr', 'Let him do it. All the way. One last time.', 3.2],
+  ['Wife', '...Fine. But this is the LAST time.', 3],
+  ['Cube', 'The last time.', 2.2, 'aside'],
+  [null, null, 5.4, 'perform'],
+  ['Wife', '...It was beautiful.', 3],
+  ['Cube', 'I know.', 2.4],
+  [null, null, 4.4, 'card'],
+]);
+const EGG = { stare: EGG_FREEZE, scare: 4.6, days: 5.7, toWork: 8.7, office: 17.4 };
+EGG.home = EGG.office + OFFICE.total;
+EGG.crash = EGG.home + 6.5;
+EGG.inside = EGG.crash + 5.9;
+EGG.end = EGG.inside + HOME.total;
+
+// which keys are being held down, for the "hold a key at startup" secrets
+const held = new Set();
+addEventListener('keydown', e => held.add(e.key.toLowerCase()), true);
+addEventListener('keyup', e => held.delete(e.key.toLowerCase()), true);
+addEventListener('blur', () => held.clear());
+
+const eggCanvas = document.getElementById('eggCanvas'), eggCtx = eggCanvas.getContext('2d');
+const eggText = document.getElementById('eggText'), caption = document.getElementById('caption');
+
+// sounds made on the spot: a low hum for the stare, and the scare noise
+function eggAudio() {
+  if (!egg.audio) try { egg.audio = new (window.AudioContext || window.webkitAudioContext)(); } catch { return null; }
+  // made before the first click (to decode the rewind sound), so it may still be waiting to start
+  if (egg.audio.state === 'suspended') egg.audio.resume();
+  return egg.audio;
+}
+function startDrone() {
+  const ac = eggAudio();
+  if (!ac) return;
+  const osc = ac.createOscillator(), osc2 = ac.createOscillator(), gain = ac.createGain();
+  osc.type = 'sine'; osc.frequency.value = 48;
+  osc2.type = 'sawtooth'; osc2.frequency.value = 48.6;
+  gain.gain.setValueAtTime(0, ac.currentTime);
+  gain.gain.linearRampToValueAtTime(0.18 * settings.sfx, ac.currentTime + 2.6);
+  [osc, osc2].forEach(o => { o.connect(gain); o.start(); });
+  gain.connect(ac.destination);
+  egg.drone = { stop: () => { gain.gain.cancelScheduledValues(ac.currentTime); gain.gain.setValueAtTime(0, ac.currentTime); osc.stop(); osc2.stop(); } };
+}
+function scareNoise() {
+  const ac = eggAudio();
+  if (!ac) return;
+  const t = ac.currentTime, len = 1.2;
+  const buf = ac.createBuffer(1, ac.sampleRate * len, ac.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 1.5);
+  const noise = ac.createBufferSource(), shriek = ac.createOscillator(), shriek2 = ac.createOscillator();
+  noise.buffer = buf;
+  shriek.type = 'sawtooth'; shriek2.type = 'square';
+  shriek.frequency.setValueAtTime(900, t); shriek.frequency.exponentialRampToValueAtTime(70, t + len);
+  shriek2.frequency.setValueAtTime(1340, t); shriek2.frequency.exponentialRampToValueAtTime(95, t + len);
+  const gain = ac.createGain();
+  gain.gain.setValueAtTime(0.75 * settings.sfx, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + len);
+  [noise, shriek, shriek2].forEach(n => { n.connect(gain); n.start(t); n.stop(t + len); });
+  gain.connect(ac.destination);
+}
+// "speech": a run of menu blips, pitched low for the cube and high for his wife
+function speak(who, text, always = false) {
+  const pitch = { Wife: 1.45, Boss: 0.55, Coworker: 1.2, Baby: 2.1, Dr: 1, Teen: 1.2, Gary: 1.05 }[who] || 0.8, count = Math.min(14, Math.max(3, Math.round(text.length / 3.5)));
+  for (let i = 0; i < count; i++) setTimeout(() => {
+    if (!egg.active && !always) return;
+    const c = (i === 0 ? selectSnd : hoverSnd).cloneNode();
+    c.preservesPitch = false;
+    c.playbackRate = pitch * (0.85 + Math.random() * 0.35);
+    c.volume = settings.sfx * (i === 0 ? 0.45 : 0.9);
+    c.play().catch(() => {});
+  }, i * 115);
+}
+
+
+// ---- the world for the story: a street from home to work, the office, and the living room ----
+const eggScene = new THREE.Scene();
+eggScene.background = new THREE.Color(0x000000);
+eggScene.fog = new THREE.Fog(0x000000, 18, 70);
+const eggCam = new THREE.PerspectiveCamera(52, 1, 0.1, 200);
+const eggAmbient = new THREE.AmbientLight(0xffffff, 0.55);
+const eggSun = new THREE.DirectionalLight(0xffffff, 0.75);
+eggSun.position.set(6, 10, 4);
+eggScene.add(eggAmbient, eggSun);
+const DAY = { sky: new THREE.Color(0x1d1744), ambient: 0.6, sun: 0.8 };
+const DUSK = { sky: new THREE.Color(0x07051a), ambient: 0.35, sun: 0.25 };
+function setTimeOfDay(k) {   // 0 = day, 1 = dusk
+  eggScene.background.copy(DAY.sky).lerp(DUSK.sky, k);
+  eggScene.fog.color.copy(eggScene.background);
+  eggAmbient.intensity = lerp(DAY.ambient, DUSK.ambient, k);
+  eggSun.intensity = lerp(DAY.sun, DUSK.sun, k);
+  lampMat.color.setHex(0x4a4266).lerp(new THREE.Color(0xffc86b), k);
+  beams.forEach(b => (b.visible = k > 0.5));
+}
+// the same "random" city every time
+let seed = 7;
+const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+
+const street = new THREE.Group(), office = new THREE.Group(), inside = new THREE.Group();
+eggScene.add(street, office, inside);
+const HOME_Z = 10, WORK_Z = -150, ROAD_FROM = 16, ROAD_TO = -150;
+const roadLen = ROAD_FROM - ROAD_TO, roadMid = (ROAD_FROM + ROAD_TO) / 2;
+const asphalt = new THREE.Mesh(new THREE.BoxGeometry(5, 0.1, roadLen), new THREE.MeshLambertMaterial({ color: 0x17122c }));
+asphalt.position.set(0, -0.05, roadMid);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshLambertMaterial({ color: 0x0c0920 }));
+ground.rotation.x = -Math.PI / 2;
+ground.position.set(0, -0.11, roadMid);
+street.add(asphalt, ground);
+// glowing dashed centre line
+const dashCount = Math.floor(roadLen / 2.4);
+const dashes = new THREE.InstancedMesh(new THREE.BoxGeometry(0.12, 0.03, 1.1), new THREE.MeshBasicMaterial({ color: 0xc4bbff }), dashCount);
+for (let i = 0; i < dashCount; i++) dashes.setMatrixAt(i, new THREE.Matrix4().makeTranslation(0, 0.01, ROAD_FROM - 1 - i * 2.4));
+street.add(dashes);
+// curbs, and sidewalks laid in the same purple tiles as the intro
+const curbMat = new THREE.MeshLambertMaterial({ color: 0x8f7cff, emissive: 0x241a66 });
+[-2.6, 2.6].forEach(x => {
+  const curb = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, roadLen), curbMat);
+  curb.position.set(x, 0.03, roadMid);
+  street.add(curb);
+});
+const walkRows = Math.floor(roadLen);
+const walk = new THREE.InstancedMesh(new THREE.BoxGeometry(0.94, 0.06, 0.94), new THREE.MeshLambertMaterial({ color: 0x4a3cc0, emissive: 0x150f40 }), walkRows * 4);
+for (let i = 0; i < walkRows * 4; i++) {
+  const x = [-4.2, -3.2, 3.2, 4.2][i % 4], z = ROAD_FROM - 0.5 - Math.floor(i / 4);
+  walk.setMatrixAt(i, new THREE.Matrix4().makeTranslation(x, 0.03, z));
+}
+street.add(walk);
+// street lamps on alternating sides
+const lampMat = new THREE.MeshBasicMaterial({ color: 0x4a4266 });
+const poleMat = new THREE.MeshLambertMaterial({ color: 0x2a2448 });
+for (let z = 4, side = 1; z > ROAD_TO + 6; z -= 13, side = -side) {
+  const pole = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.8, 0.1), poleMat);
+  pole.position.set(side * 2.95, 1.4, z);
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.07, 0.07), poleMat);
+  arm.position.set(side * 2.6, 2.78, z);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.12, 0.34), lampMat);
+  head.position.set(side * 2.3, 2.7, z);
+  street.add(pole, arm, head);
+}
+// block buildings with lit windows facing the street
+const buildingColors = [0x2b2363, 0x352a78, 0x3f3290, 0x2a2058, 0x46389c];
+const windowSpots = [];
+[-1, 1].forEach(side => {
+  for (let z = 2; z > ROAD_TO + 14;) {
+    const w = 2.6 + rand() * 2.2, h = 2.2 + rand() * 8, d = 3 + rand() * 2, gap = 0.6 + rand() * 1.4;
+    const x = side * (5.4 + d / 2 + rand() * 0.8);
+    const b = new THREE.Mesh(new THREE.BoxGeometry(d, h, w), new THREE.MeshLambertMaterial({ color: buildingColors[Math.floor(rand() * 5)] }));
+    b.position.set(x, h / 2, z - w / 2);
+    street.add(b);
+    // a grid of windows on the side facing the road
+    for (let wy = 0.9; wy < h - 0.4; wy += 1.1) for (let wz = 0.55; wz < w - 0.35; wz += 0.85) {
+      windowSpots.push([x - side * (d / 2 + 0.01), wy, z - wz, side, rand()]);
+    }
+    z -= w + gap;
+  }
+});
+const windows = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.34, 0.46), new THREE.MeshBasicMaterial(), windowSpots.length);
+const WIN_LIT = [new THREE.Color(0xffc86b), new THREE.Color(0xc4bbff)], WIN_DARK = new THREE.Color(0x1a1533);
+windowSpots.forEach(([x, y, z, side, r], i) => {
+  windows.setMatrixAt(i, new THREE.Matrix4().makeRotationY(-side * Math.PI / 2).setPosition(x, y, z));
+  windows.setColorAt(i, r < 0.32 ? WIN_LIT[0] : r < 0.45 ? WIN_LIT[1] : WIN_DARK);
+});
+street.add(windows);
+// a few glass cubes drifting high above, as in the menu
+const skyCubes = Array.from({ length: 16 }, (_, i) => {
+  const m = new THREE.Mesh(cube.geometry, glassMat.clone());
+  m.userData = { x: (rand() - 0.5) * 30, y: 9 + rand() * 9, z: ROAD_FROM - rand() * roadLen, s: 0.6 + rand() * 1.2 };
+  m.material.uniforms.opacity.value = 0.7;
+  street.add(m);
+  return m;
+});
+// home at one end of the street, work at the other
+function blockHouse() {
+  const h = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(4, 2.8, 3.2), new THREE.MeshLambertMaterial({ color: 0x4a3cb0, emissive: 0x1a1450 }));
+  body.position.y = 1.4;
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(3.3, 1.8, 4), new THREE.MeshLambertMaterial({ color: 0x8f7cff, emissive: 0x2a1f70 }));
+  roof.rotation.y = Math.PI / 4;
+  roof.position.y = 3.7;
+  const door = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.7), new THREE.MeshBasicMaterial({ color: 0x07040f }));
+  door.position.set(0, 0.85, 1.61);
+  h.add(body, roof, door);
+  [-1.35, 1.35].forEach(x => {
+    const w = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.7), new THREE.MeshBasicMaterial({ color: 0xffc86b }));
+    w.position.set(x, 1.7, 1.61);
+    h.add(w);
+  });
+  return h;
+}
+const home = blockHouse();
+home.rotation.y = Math.PI;   // front door faces down the street
+home.position.set(0, 0, HOME_Z);
+street.add(home);
+const DOOR_Z = HOME_Z - 1.61;
+function signTexture() {
+  const cv = document.createElement('canvas');
+  cv.width = 1024; cv.height = 160;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#f2f2f6';
+  g.font = '110px "GameCube", "Arial Black", Arial, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText('GAMESQUARE', 512, 84);
+  return new THREE.CanvasTexture(cv);
+}
+const work = new THREE.Group();
+const tower = new THREE.Mesh(new THREE.BoxGeometry(14, 18, 7), new THREE.MeshLambertMaterial({ color: 0x3a2e88, emissive: 0x120d38 }));
+tower.position.y = 9;
+const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.4), new THREE.MeshBasicMaterial({ map: signTexture(), transparent: true }));
+sign.position.set(0, 15.5, 3.52);
+const entrance = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.6), new THREE.MeshBasicMaterial({ color: 0xc4bbff }));
+entrance.position.set(0, 1.3, 3.52);
+work.add(tower, sign, entrance);
+for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+  if (r === 0 && c > 2 && c < 6) continue;
+  const w = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ color: (r * 7 + c * 3) % 5 < 2 ? 0xffc86b : 0x241c55 }));
+  w.position.set(-5.6 + c * 1.4, 2.2 + r * 1.45, 3.52);
+  work.add(w);
+}
+work.position.set(0, 0, WORK_Z - 7);
+street.add(work);
+// the stray block he hits on the way home
+const stray = new THREE.Mesh(cube.geometry, new THREE.MeshLambertMaterial({ color: 0x5546d6, emissive: 0x1a1450 }));
+stray.scale.setScalar(1.3);
+const STRAY_Z = -4;
+stray.position.set(0.3, 0.65, STRAY_Z);
+stray.rotation.y = 0.3;
+street.add(stray);
+
+// ---- the car: low voxel body, glass cabin, the cube at the wheel ----
+const car = new THREE.Group();
+const carPaint = new THREE.MeshLambertMaterial({ color: 0x7a6cf0, emissive: 0x221a66 });
+const carBody = new THREE.Mesh(roundedBox(1, 0.1, 6), carPaint);
+carBody.scale.set(1.7, 0.5, 3);
+carBody.position.y = 0.55;
+const cabin = new THREE.Mesh(roundedBox(1, 0.14, 6), new THREE.MeshLambertMaterial({ color: 0xc4bbff, transparent: true, opacity: 0.35, depthWrite: false }));
+cabin.scale.set(1.45, 0.55, 1.5);
+cabin.position.set(0, 1.07, 0.25);
+const driverCube = new THREE.Mesh(cube.geometry, new THREE.MeshLambertMaterial({ color: 0x9b8cff, emissive: 0x3b2fa0, emissiveIntensity: 0.5 }));
+driverCube.scale.setScalar(0.55);
+driverCube.position.set(0, 1.0, 0.2);
+car.add(carBody, cabin, driverCube);
+const trimMat = new THREE.MeshLambertMaterial({ color: 0x8f7cff });
+[-1, 1].forEach(end => {
+  const bumper = new THREE.Mesh(new THREE.BoxGeometry(1.74, 0.12, 0.1), trimMat);
+  bumper.position.set(0, 0.36, end * 1.52);
+  car.add(bumper);
+  [-0.55, 0.55].forEach(x => {
+    const light = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.13, 0.05), new THREE.MeshBasicMaterial({ color: end < 0 ? 0xfff2d0 : 0xff5c8a }));
+    light.position.set(x, 0.62, end * 1.52);
+    car.add(light);
+  });
+});
+const wheelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.24, 20);
+wheelGeo.rotateZ(Math.PI / 2);
+const hubGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.26, 12);
+hubGeo.rotateZ(Math.PI / 2);
+const carWheels = [];
+[[-0.86, -0.95], [0.86, -0.95], [-0.86, 0.95], [0.86, 0.95]].forEach(([x, z]) => {
+  const w = new THREE.Group();
+  w.add(new THREE.Mesh(wheelGeo, new THREE.MeshLambertMaterial({ color: 0x14111f })), new THREE.Mesh(hubGeo, trimMat));
+  w.position.set(x, 0.3, z);
+  car.add(w);
+  carWheels.push(w);
+});
+// headlight beams for the evening drive
+const beams = [-0.55, 0.55].map(x => {
+  const beam = new THREE.Mesh(new THREE.ConeGeometry(1.1, 6, 16, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xfff2d0, transparent: true, opacity: 0.07, depthWrite: false, blending: THREE.AdditiveBlending }));
+  beam.rotation.x = -Math.PI / 2;
+  beam.position.set(x, 0.62, -4.5);
+  car.add(beam);
+  return beam;
+});
+street.add(car);
+
+// the car's voxels, ready to burst: body, cabin and wheels as little cubes in car space
+const VOX = 0.19, voxelSpots = [];
+const addVoxels = (sx, sy, sz, cx, cy, cz, color) => {
+  for (let x = -sx / 2 + VOX / 2; x < sx / 2; x += VOX) for (let y = -sy / 2 + VOX / 2; y < sy / 2; y += VOX)
+    for (let z = -sz / 2 + VOX / 2; z < sz / 2; z += VOX) voxelSpots.push([cx + x, cy + y, cz + z, color]);
+};
+addVoxels(1.7, 0.5, 3, 0, 0.55, 0, new THREE.Color(0x7a6cf0));
+addVoxels(1.4, 0.5, 1.45, 0, 1.07, 0.25, new THREE.Color(0xc4bbff));
+[[-0.86, -0.95], [0.86, -0.95], [-0.86, 0.95], [0.86, 0.95]].forEach(([x, z]) => addVoxels(0.24, 0.6, 0.6, x, 0.3, z, new THREE.Color(0x221c38)));
+const voxels = new THREE.InstancedMesh(new THREE.BoxGeometry(VOX * 0.92, VOX * 0.92, VOX * 0.92), new THREE.MeshLambertMaterial(), voxelSpots.length);
+voxelSpots.forEach(([, , , color], i) => voxels.setColorAt(i, color));
+voxels.visible = false;
+street.add(voxels);
+const voxelState = voxelSpots.map(() => ({ p: new THREE.Vector3(), v: new THREE.Vector3(), r: new THREE.Euler(), w: new THREE.Vector3() }));
+function burstCar(speed) {
+  car.updateMatrixWorld();
+  voxelSpots.forEach(([x, y, z], i) => {
+    const s = voxelState[i];
+    s.p.set(x, y, z).applyMatrix4(car.matrixWorld);
+    // carried forward by the crash, flung up and out
+    s.v.set((rand() - 0.5) * 7 + x * 2, 2 + rand() * 6, speed * (0.25 + rand() * 0.55) + (rand() - 0.5) * 3);
+    s.r.set(rand() * 6, rand() * 6, rand() * 6);
+    s.w.set((rand() - 0.5) * 18, (rand() - 0.5) * 18, (rand() - 0.5) * 18);
+  });
+  voxels.visible = true;
+  car.visible = false;
+}
+const voxM = new THREE.Matrix4(), voxQ = new THREE.Quaternion(), voxS = new THREE.Vector3(1, 1, 1);
+function stepVoxels(dt) {
+  voxelState.forEach((s, i) => {
+    s.v.y -= 20 * dt;
+    s.p.addScaledVector(s.v, dt);
+    if (s.p.y < VOX / 2) {   // bounce, scrape along, settle
+      s.p.y = VOX / 2;
+      s.v.y = Math.abs(s.v.y) > 1.2 ? -s.v.y * 0.3 : 0;
+      s.v.x *= 0.82; s.v.z *= 0.82;
+      s.w.multiplyScalar(0.8);
+    }
+    s.r.x += s.w.x * dt; s.r.y += s.w.y * dt; s.r.z += s.w.z * dt;
+    voxM.compose(s.p, voxQ.setFromEuler(s.r), voxS);
+    voxels.setMatrixAt(i, voxM);
+  });
+  voxels.instanceMatrix.needsUpdate = true;
+}
+
+// ---- the office ----
+office.position.set(300, 0, 0);
+const officeFloor = new THREE.InstancedMesh(new THREE.BoxGeometry(0.94, 0.04, 0.94), new THREE.MeshLambertMaterial({ color: 0x2c2560 }), 12 * 8);
+for (let i = 0; i < 96; i++) officeFloor.setMatrixAt(i, new THREE.Matrix4().makeTranslation((i % 12) - 5.5, 0, -Math.floor(i / 12) + 2.5));
+const officeWall = new THREE.Mesh(new THREE.PlaneGeometry(14, 6), new THREE.MeshLambertMaterial({ color: 0x1c1645 }));
+officeWall.position.set(0, 3, -5);
+const sideWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 6), new THREE.MeshLambertMaterial({ color: 0x181238 }));
+sideWall.rotation.y = Math.PI / 2;
+sideWall.position.set(-6, 3, 0);
+const officeWindow = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.8), new THREE.MeshBasicMaterial({ color: 0x6f63d8 }));
+officeWindow.rotation.y = Math.PI / 2;
+officeWindow.position.set(-5.98, 2.6, -1.2);
+const windowFrame = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 2), new THREE.MeshLambertMaterial({ color: 0x8f7cff }));
+windowFrame.rotation.y = Math.PI / 2;
+windowFrame.position.set(-5.99, 2.6, -1.2);
+office.add(officeFloor, officeWall, sideWall, windowFrame, officeWindow);
+// a wall clock whose hands race through the afternoon
+const clockFace = new THREE.Mesh(new THREE.CircleGeometry(0.55, 40), new THREE.MeshBasicMaterial({ color: 0xe8e4ff }));
+clockFace.position.set(2.6, 3.6, -4.98);
+const handMat = new THREE.MeshBasicMaterial({ color: 0x1a1440 });
+const hourHand = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.3), handMat);
+const minuteHand = new THREE.Mesh(new THREE.PlaneGeometry(0.04, 0.45), handMat);
+[hourHand, minuteHand].forEach(h => { h.geometry.translate(0, h.geometry.parameters.height / 2, 0); h.position.set(2.6, 3.6, -4.97); office.add(h); });
+office.add(clockFace);
+const officeLamp = new THREE.PointLight(0xfff0d8, 0.6, 14);
+officeLamp.position.set(0, 4, 1);
+office.add(officeLamp);
+// desks with monitors, and the people at them
+function screenTexture() {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 128;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#120d33';
+  g.fillRect(0, 0, 128, 128);
+  g.fillStyle = '#6b5dde';
+  path.forEach(([x, z]) => g.fillRect(34 + x * 12, 34 + z * 12, 10, 10));
+  g.fillRect(56, 56, 16, 16);
+  return new THREE.CanvasTexture(cv);
+}
+const deskMat = new THREE.MeshLambertMaterial({ color: 0x8f7cff, emissive: 0x1a1450 });
+const screenMat = new THREE.MeshBasicMaterial({ map: screenTexture() });
+function person(color, w = 0.6, h = 0.6) {
+  const m = new THREE.Mesh(cube.geometry, new THREE.MeshLambertMaterial({ color, emissive: 0x1a1450, emissiveIntensity: 0.5 }));
+  m.scale.set(w, h, w);
+  m.position.y = h / 2;
+  return m;
+}
+const workers = [];
+[-3, 0, 3].forEach((x, i) => {
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.1, 0.95), deskMat);
+  top.position.set(x, 0.78, -1.5);
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.75, 0.06), deskMat);
+  panel.position.set(x, 0.4, -1.95);
+  const monitor = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.55, 0.06), new THREE.MeshLambertMaterial({ color: 0x14111f }));
+  monitor.position.set(x, 1.2, -1.75);
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.76, 0.46), screenMat);
+  screen.position.set(x, 1.2, -1.71);
+  office.add(top, panel, monitor, screen);
+  // he sits at the middle desk; coworkers either side
+  const p = person([0xb4a8ff, 0x9b8cff, 0xff9ad0][i]);
+  p.position.set(x, 0.3, -0.75);
+  office.add(p);
+  workers.push(p);
+});
+const boss = person(0x5a4ac8, 0.75, 1.3);
+office.add(boss);
+
+// ---- the living room ----
+inside.position.set(-300, 0, 0);
+const livingFloor = new THREE.InstancedMesh(new THREE.BoxGeometry(0.94, 0.04, 0.94), new THREE.MeshLambertMaterial({ color: 0x3b2fa0 }), 12 * 8);
+for (let i = 0; i < 96; i++) livingFloor.setMatrixAt(i, new THREE.Matrix4().makeTranslation((i % 12) - 5.5, 0, -Math.floor(i / 12) + 2));
+inside.add(livingFloor);
+const backWall = new THREE.Mesh(new THREE.PlaneGeometry(14, 6), new THREE.MeshLambertMaterial({ color: 0x1a1440 }));
+backWall.position.set(0, 3, -5.5);
+inside.add(backWall);
+// a framed print of the logo
+function logoPrint() {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 256;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#0d0a22';
+  g.fillRect(0, 0, 256, 256);
+  g.fillStyle = '#6b5dde';
+  const u = 30, o = (256 - 5 * u) / 2;
+  path.forEach(([x, z]) => g.fillRect(o + x * u + 1, o + z * u + 1, u - 2, u - 2));
+  g.fillRect(128 - u * 0.75, 128 - u * 0.75, u * 1.5, u * 1.5);
+  return new THREE.CanvasTexture(cv);
+}
+const picture = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.4), new THREE.MeshBasicMaterial({ map: logoPrint() }));
+picture.position.set(0, 2.9, -5.45);
+inside.add(picture);
+const lamp = new THREE.PointLight(0xffc86b, 0.8, 12);
+lamp.position.set(0, 3.2, 1);
+inside.add(lamp);
+function homeBlock(color, emissive) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(cube.geometry, new THREE.MeshLambertMaterial({ color, emissive, emissiveIntensity: 0.5 }));
+  body.position.y = 0.5;
+  g.add(body);
+  g.userData = { body };
+  return g;
+}
+const husband = homeBlock(0x9b8cff, 0x3b2fa0);
+const wife = homeBlock(0xff7ac0, 0x5a1a40);
+husband.position.set(-1.25, 0, 0); husband.rotation.y = 0.45;
+wife.position.set(1.25, 0, 0); wife.rotation.y = -0.45;
+inside.add(husband, wife);
+const baby = homeBlock(0xc4bbff, 0x3b2fa0);
+baby.userData.body.scale.setScalar(0.38);
+baby.userData.body.position.y = 0.19;
+inside.add(baby);
+// Dr. Memory Card: a grey card standing on its edge, with its little label
+const doctor = new THREE.Group();
+const card59 = new THREE.Mesh(roundedBox(1, 0.08, 4), new THREE.MeshLambertMaterial({ color: 0x9a96b0, emissive: 0x24223a }));
+card59.scale.set(0.8, 1.1, 0.22);
+card59.position.y = 0.55;
+function cardLabel() {
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 96;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#e8e4ff'; g.fillRect(0, 0, 128, 96);
+  g.fillStyle = '#3b2fa0'; g.font = 'bold 44px "Helvetica Neue", Arial, sans-serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('59', 64, 50);
+  return new THREE.CanvasTexture(cv);
+}
+const label59 = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.38), new THREE.MeshBasicMaterial({ map: cardLabel() }));
+label59.position.set(0, 0.7, 0.115);
+doctor.add(card59, label59);
+doctor.userData = { body: card59 };
+inside.add(doctor);
+
+// ---- rolling the logo: any block, any size, across a floor, leaving tiles where it lands ----
+function logoCells(cx, cz, size) { return path.map(([x, z]) => new THREE.Vector3(cx + (x - 2) * size, 0, cz + (z - 2) * size)); }
+function tileLayer(parent, size) {
+  const tiles = new THREE.InstancedMesh(new THREE.BoxGeometry(size * 0.94, 0.03, size * 0.94), new THREE.MeshBasicMaterial({ color: 0x6b5dde }), path.length);
+  tiles.count = 0;
+  parent.add(tiles);
+  return tiles;
+}
+// where a block of `size` is (center + rotation) `t` seconds into rolling along `cells`, one cell per `step`
+const rollQ = new THREE.Quaternion(), rollUp = new THREE.Vector3(0, 1, 0);
+function rollAlong(cells, size, t, step, tiles, onLand) {
+  const n = cells.length - 1, u = Math.max(0, t / step), k = Math.min(n - 1, Math.floor(u)), f = u >= n ? 1 : u - k;
+  const a = cells[k], b = cells[k + 1], dir = b.clone().sub(a).normalize();
+  rollQ.setFromAxisAngle(new THREE.Vector3().crossVectors(rollUp, dir).normalize(), smoother(f) * Math.PI / 2);
+  const center = a.clone().addScaledVector(dir, size / 2).add(new THREE.Vector3(-dir.x * size / 2, size / 2, -dir.z * size / 2).applyQuaternion(rollQ));
+  const landed = Math.min(cells.length, Math.floor(u) + 1);
+  if (tiles) {
+    tiles.count = landed;
+    for (let i = 0; i < landed; i++) tiles.setMatrixAt(i, new THREE.Matrix4().makeTranslation(cells[i].x, 0.03, cells[i].z));
+    tiles.instanceMatrix.needsUpdate = true;
+  }
+  if (onLand) onLand(landed);
+  return { center, q: rollQ.clone(), done: u >= n };
+}
+// a low thud for each landing (menu blip, pitched down)
+function thud(rate = 0.6) { const c = hoverSnd.cloneNode(); c.preservesPitch = false; c.playbackRate = rate; c.volume = settings.sfx * 0.7; c.play().catch(() => {}); }
+// the startup chime, straight from the intro's own sound
+function chime() { audio.playbackRate = 1; audio.currentTime = 4.15; audio.volume = settings.sfx; audio.play().catch(() => {}); }
+const officeTiles = tileLayer(office, 0.6), homeTiles = tileLayer(inside, 1), babyTiles = tileLayer(inside, 0.38);
+
+
+function startEgg() {
+  egg.active = true;
+  egg.start = performance.now() / 1000;
+  Object.assign(egg, { frozen: false, scared: false, music: false, droneOn: false, officeBeat: -1, homeBeat: -1, lastE: 0, carZ: undefined, burst: false, roll: -1 });
+  eggText.textContent = '3 days later';
+  running = true;
+  whooshed = true;   // the intro never gets that far this time
+  audio.currentTime = 0;
+  audio.volume = settings.sfx;
+  audio.playbackRate = 1;
+  t0 = performance.now() / 1000;
+  audio.play().catch(() => {});
+}
+function endEgg() {
+  if (egg.sequel) return endSequel();
+  egg.active = false;
+  if (egg.drone) { egg.drone.stop(); egg.drone = null; }
+  audio.pause();
+  menu.pause();
+  menuStarted = false;
+  eggCanvas.style.display = 'none';
+  eggText.style.opacity = 0;
+  caption.style.opacity = 0;
+  play().catch(() => {});   // and now the real intro
+}
+
+// runs every frame while the secret is on; returns true when it drew the frame itself
+function eggFrame() {
+  const e = performance.now() / 1000 - egg.start;
+  if (e >= EGG.end) { endEgg(); return false; }
+
+  // 1. the intro plays, then everything stops and the cube turns to face the camera.
+  // 2. then it lunges: snaps up to fill the screen, the camera shakes, and it cuts to black
+  if (e < EGG.days) {
+    if (e >= EGG.stare && !egg.frozen) { egg.frozen = true; audio.pause(); }
+    if (e >= EGG.stare + 0.6 && !egg.droneOn) { egg.droneOn = true; startDrone(); }
+    if (e >= EGG.scare && !egg.scared) {
+      egg.scared = true;
+      if (egg.drone) { egg.drone.stop(); egg.drone = null; }
+      scareNoise();
+    }
+    update(Math.min(e, EGG.stare));
+    if (e >= EGG.stare) {
+      const k = smoother(clamp((e - EGG.stare - 0.5) / 1.6));
+      cube.quaternion.slerp(camera.quaternion, k);
+      cube.position.y = 0.5 + 0.25 * k;
+      const creep = easeInOut(clamp((e - EGG.stare - 0.8) / (EGG.scare - EGG.stare - 0.8)));
+      camera.position.addScaledVector(cube.position.clone().sub(target), creep);
+      const lunge = e >= EGG.scare ? easeOut(clamp((e - EGG.scare) / 0.09)) : 0;
+      camera.zoom = 1 + creep * 2.2 + lunge * 7;
+      if (lunge) {
+        const shake = 0.35 * (1 - clamp((e - EGG.scare) / 0.9));
+        camera.position.x += (Math.random() - 0.5) * shake;
+        camera.position.y += (Math.random() - 0.5) * shake;
+      }
+      camera.updateProjectionMatrix();
+    }
+    renderer.render(scene, camera);
+    if (e >= EGG.scare + 0.85) blackOver(1);   // hard cut
+    return true;
+  }
+  camera.zoom = 1;
+  camera.updateProjectionMatrix();
+  eggCanvas.style.display = 'none';
+
+  // 3. three days later
+  if (e < EGG.toWork) {
+    renderer.setClearColor(0x000000);
+    renderer.clear();
+    const k = (e - EGG.days) / (EGG.toWork - EGG.days);
+    eggText.style.opacity = clamp(Math.min(k * 4, (1 - k) * 4));
+    return true;
+  }
+  eggText.style.opacity = 0;
+  if (!egg.music) { egg.music = true; menu.currentTime = 0; menu.play().catch(() => {}); }
+  const dt = Math.min(0.05, e - (egg.lastE || e));
+  egg.lastE = e;
+  skyCubes.forEach((m, i) => {
+    const u = m.userData;
+    m.position.set(u.x + Math.sin(e * 0.1 + i) * 2, u.y + Math.sin(e * 0.5 + i) * 0.4, u.z);
+    m.scale.setScalar(u.s);
+    m.rotation.set(e * 0.2 + i, e * 0.15, 0);
+    m.material.uniforms.time.value = e;
+  });
+
+  // 4. morning: out of the driveway and down the street to work
+  if (e < EGG.office) {
+    showOnly(street);
+    setTimeOfDay(0);
+    stray.visible = false;   // it only turns up on the way home
+    menu.volume = settings.music * 0.7 * clamp((e - EGG.toWork) / 1.5);
+    resetCar();
+    const p = (e - EGG.toWork) / (EGG.office - EGG.toWork - 0.6);
+    const z = lerp(DOOR_Z - 3, WORK_Z + 3, smoother(clamp(p)));
+    car.position.set(0.9, 0, z);
+    car.rotation.y = 0;   // nose down the street (-z)
+    spinWheels(Math.abs(z - (egg.carZ ?? z)));
+    egg.carZ = z;
+    carBody.position.y = 0.55 + 0.015 * Math.sin(e * 23);
+    // start watching from the house, then follow
+    const follow = smoother(clamp((e - EGG.toWork - 0.6) / 1.4));
+    eggCam.position.lerpVectors(new THREE.Vector3(-3.2, 2.4, DOOR_Z - 4.5), new THREE.Vector3(z > 0 ? 2.6 : 2.6, 2.6, z + 7), follow);
+    eggCam.lookAt(car.position.x, 0.8, z - 3 * follow);
+    renderer.render(eggScene, eggCam);
+    fadeEdges(e, EGG.toWork, EGG.office);
+    return true;
+  }
+
+  // 5. at work: late again, a relapse on the carpet, fired
+  if (e < EGG.home) {
+    showOnly(office);
+    const w = e - EGG.office, B = OFFICE;
+    menu.volume = settings.music * 0.3;
+    const beat = playBeats(B, w, 'officeBeat');
+    const talking = who => beat.who === who && w - beat.at < Math.min(1.7, beat.dur - 0.3);
+    const hop = who => (talking(who) ? 0.05 * Math.abs(Math.sin(e * 17)) : 0);
+    // the boss: at his desk, wanders off, comes back to find the tiles
+    const leave = smoother(clamp((w - B.cue('leave').at - 1.2) / 1.6)), back = smoother(clamp((w - B.cue('return').at) / 1.2));
+    boss.position.set(1.2, 0.65, 0.2).lerp(new THREE.Vector3(6.5, 0.65, 2.4), leave).lerp(new THREE.Vector3(2.3, 0.65, 2.2), back);
+    boss.position.y += hop('Boss') * 1.4;
+    // coworkers typing (or talking)
+    workers[0].position.y = 0.3 + 0.02 * Math.abs(Math.sin(e * 9));
+    workers[2].position.y = 0.3 + (talking('Coworker') ? hop('Coworker') : 0.02 * Math.abs(Math.sin(e * 11)));
+    // him: at the desk, twitching, then off the chair and rolling half the logo across the carpet
+    const me = workers[1], roll = B.cue('roll'), cells = logoCells(0, 1.3, 0.6).slice(0, 9);
+    const rt = w - roll.at;
+    if (rt < 0) {
+      officeTiles.count = 0;
+      egg.officeLanded = 0;
+      me.quaternion.identity();
+      me.position.set(0, 0.3 + hop('Cube'), -0.75);
+      const tw = B.cue('twitch');
+      if (w > tw.at && w < tw.at + tw.dur + B[B.indexOf(tw) + 1].dur) me.position.x += (Math.random() - 0.5) * 0.05;
+    } else if (rt < 0.6) {
+      const f = smoother(rt / 0.6);
+      me.position.set(0, 0.3, -0.75).lerp(cells[0].clone().setY(0.3), f);
+      me.position.y += Math.sin(Math.PI * f) * 0.6;
+    } else {
+      const r = rollAlong(cells, 0.6, rt - 0.6, 0.3, officeTiles, n => { if (n > egg.officeLanded) { egg.officeLanded = n; thud(0.7); } });
+      me.position.copy(r.center);
+      me.quaternion.copy(r.q);
+      me.position.y += hop('Cube');
+    }
+    minuteHand.rotation.z = -w * 0.05;
+    hourHand.rotation.z = -Math.PI * 0.3 - w * 0.004;
+    officeWindow.material.color.setHex(0x6f63d8);
+    officeLamp.intensity = 0.6;
+    // camera: on the desks, then up and back to take in the tiles; a jolt on "OUT."
+    const up = smoother(clamp((rt - 0.3) / 1.2));
+    eggCam.position.set(300 + 0.4 * Math.sin(e * 0.3), lerp(2.6, 4.4, up), lerp(5.2, 6.4, up));
+    const out = B.cue('shake');
+    if (w > out.at && w < out.at + 0.5) { eggCam.position.x += (Math.random() - 0.5) * 0.3; eggCam.position.y += (Math.random() - 0.5) * 0.3; }
+    eggCam.lookAt(300, lerp(1.1, 0.4, up), lerp(-1.6, 0.6, up));
+    renderer.render(eggScene, eggCam);
+    fadeEdges(e, EGG.office, EGG.home);
+    return true;
+  }
+
+  // 6. evening: the drive home, the crash, and the roll to the door
+  if (e < EGG.inside) {
+    showOnly(street);
+    setTimeOfDay(1);
+    stray.visible = true;
+    menu.volume = settings.music * 0.6 * clamp((EGG.inside - e) / 1.5) * (e < EGG.crash ? 1 : 0.4);
+    const crashZ = STRAY_Z - 2.1;
+    if (e < EGG.crash) {
+      resetCar();
+      const p = (e - EGG.home) / (EGG.crash - EGG.home);
+      // pull away for the first 15%, then cruise flat out right into it
+      const a = 0.15, f = p < a ? p * p / (2 * a) / (1 - a / 2) : (p - a / 2) / (1 - a / 2);
+      const z = lerp(WORK_Z + 3, crashZ, f);
+      car.position.set(0.9 - 0.9 * smoother(clamp((p - 0.85) / 0.15)), 0, z);   // drifts over the line just before
+      car.rotation.y = Math.PI;   // nose toward home (+z)
+      spinWheels(Math.abs(z - (egg.carZ ?? z)));
+      egg.carZ = z;
+      carBody.position.y = 0.55 + 0.015 * Math.sin(e * 23);
+      eggCam.position.set(car.position.x - 2.6, 2.6, z - 7);
+      eggCam.lookAt(car.position.x, 0.8, z + 3);
+      egg.camAtCrash = eggCam.position.clone();
+    } else {
+      if (!egg.burst) {
+        egg.burst = true;
+        burstCar(14);
+        crashNoise();
+        stray.position.set(2.1, 0.65, STRAY_Z + 1.2);   // knocked over to the curb
+        stray.rotation.y = 0.9;
+      }
+      stepVoxels(dt);
+      // he's thrown out, lands, then rolls the rest of the way home
+      const c = e - EGG.crash, flight = 0.9, land = -0.4, size = 0.6;
+      driverCube.visible = false;
+      flyer.visible = true;
+      if (c < flight) {
+        const f = c / flight;
+        flyer.position.set(0.3 * f, 1 + 2.6 * Math.sin(Math.PI * f) - 0.7 * f, lerp(crashZ, land, f));
+        flyer.rotation.set(f * Math.PI * 3, 1.2 * Math.sin(Math.PI * f), 0.6 * Math.sin(Math.PI * f));   // tumbles, lands flat
+        flyer.scale.setScalar(size);
+      } else {
+        const rollStart = flight + 0.6, ROLL = 0.24;
+        const rolls = Math.max(0, Math.floor((DOOR_Z - 0.3 - land) / size));
+        const u = (c - rollStart) / ROLL, k = Math.min(rolls, Math.floor(Math.max(0, u)));
+        const f = u < 0 ? 0 : k >= rolls ? 1 : u - k;
+        if (u >= 0 && k < rolls && k !== egg.roll) { egg.roll = k; const c2 = hoverSnd.cloneNode(); c2.preservesPitch = false; c2.playbackRate = 0.6; c2.volume = settings.sfx * 0.7; c2.play().catch(() => {}); }
+        // rigid roll over the leading bottom edge, toward the door (+z)
+        const zBase = land + k * size, angle = (k >= rolls ? 0 : f) * Math.PI / 2;
+        flyer.rotation.set(angle, 0, 0);
+        flyer.position.set(0.3, size / 2 * (Math.cos(angle) + Math.sin(angle)), zBase + size + size / 2 * (Math.sin(angle) - Math.cos(angle)));
+        if (k >= rolls) {   // in through the door
+          const into = clamp((u - rolls) * ROLL / 0.6);
+          flyer.position.z += into * 1.2;
+          flyer.scale.setScalar(size * (1 - into));
+        } else flyer.scale.setScalar(size);
+      }
+      // the camera stops dead at the crash, shakes, then follows him home
+      const shake = 0.5 * Math.max(0, 1 - c / 0.6);
+      const follow = smoother(clamp((c - 1.2) / 1.2));
+      if (!egg.camAtCrash) egg.camAtCrash = new THREE.Vector3(-1.7, 2.6, crashZ - 7);
+      eggCam.position.copy(egg.camAtCrash).lerp(new THREE.Vector3(flyer.position.x - 2.6, 2.6, flyer.position.z - 5.5), follow);
+      eggCam.position.x += (Math.random() - 0.5) * shake;
+      eggCam.position.y += (Math.random() - 0.5) * shake;
+      eggCam.lookAt(flyer.position.x, 0.4, flyer.position.z + 2.5);
+    }
+    renderer.render(eggScene, eggCam);
+    fadeEdges(e, EGG.home, EGG.inside);
+    return true;
+  }
+
+  // 7. home: the wife, the baby, Dr. Memory Card, and one last roll
+  showOnly(inside);
+  flyer.visible = false;
+  const t = e - EGG.inside, H = HOME;
+  menu.volume = settings.music * 0.3 * clamp(t / 1.5) * (t > H.cue('card').at ? 0 : 1);
+  const beat = playBeats(H, t, 'homeBeat', cue => {
+    if (cue === 'doorbell') { playSelect(); setTimeout(playSelect, 380); }
+    if (cue === 'relapse') chime();
+    if (cue === 'card') { caption.style.opacity = 0; eggText.textContent = 'He has been clean for 0 days'; }
+  });
+  const talking = who => beat.who === who && t - beat.at < Math.min(1.7, beat.dur - 0.3);
+  const hopOf = who => (talking(who) ? Math.abs(Math.sin(e * 17)) : 0);
+  const since = cue => t - H.cue(cue).at;
+  const aside = smoother(clamp(since('aside') / 1.4));
+  const perfCells = logoCells(0, 0.6, 1);
+  // her: across from him, then out of the way for the big roll
+  wife.position.set(1.25, 0, 0).lerp(new THREE.Vector3(3.7, 0, 1.4), aside);
+  wife.rotation.y = lerp(-0.45, -0.9, aside);
+  // the baby wanders in, does a tiny roll of its own, then gets moved aside
+  baby.visible = since('baby') > 0;
+  const babyCells = [0.6, 0.98, 1.36, 1.74].map(x => new THREE.Vector3(x, 0, 1.6));
+  if (since('babyroll') < 0) {
+    const f = smoother(clamp(since('baby') / 1.6));
+    baby.position.set(lerp(5, 0.6, f), 0.12 * Math.abs(Math.sin(f * Math.PI * 4)), 1.6);
+    baby.userData.body.quaternion.identity();
+    babyTiles.count = 0;
+  } else {
+    const r = rollAlong(babyCells, 0.38, since('babyroll') - 0.3, 0.32, babyTiles);
+    baby.position.copy(r.center).setY(r.center.y - 0.19).lerp(new THREE.Vector3(3.1, 0, 2.6), aside);
+    baby.userData.body.quaternion.copy(r.q);
+  }
+  // Dr. Memory Card arrives after the doorbell
+  doctor.visible = since('doctor') > 0;
+  doctor.position.set(0.2, 0, -1.5).lerp(new THREE.Vector3(-3.7, 0, -0.2), aside);
+  doctor.rotation.y = lerp(0, 0.5, aside);
+  // him: by the couch, a relapse mid-sentence, then the whole logo across the living room floor
+  const relapse = since('relapse'), perform = since('perform');
+  const relapseCells = [0, 1, 2].map(i => new THREE.Vector3(-1.25, 0, i));
+  const body = husband.userData.body;
+  if (relapse < 0) {
+    husband.position.set(-1.25, 0, 0);
+    husband.rotation.y = 0.45;
+    body.quaternion.identity();
+    homeTiles.count = 0;
+    egg.homeLanded = 0;
+    egg.chimed = false;
+  } else if (since('aside') < 0) {
+    const r = rollAlong(relapseCells, 1, relapse, 0.38);
+    husband.rotation.y = 0;
+    husband.position.copy(r.center).setY(r.center.y - 0.5);
+    body.quaternion.copy(r.q);
+  } else if (perform < 0) {   // hop over to the starting tile
+    const f = smoother(clamp(since('aside') / 1.6));
+    husband.rotation.y = 0;
+    body.quaternion.identity();
+    husband.position.copy(relapseCells[2]).lerp(perfCells[0], f);
+    husband.position.y = Math.sin(Math.PI * f) * 0.9;
+  } else {
+    const r = rollAlong(perfCells, 1, perform - 0.4, 0.27, homeTiles, n => { if (n > egg.homeLanded) { egg.homeLanded = n; thud(0.55); } });
+    husband.rotation.y = 0;
+    husband.position.copy(r.center).setY(r.center.y - 0.5);
+    body.quaternion.copy(r.q);
+    if (r.done && !egg.chimed) { egg.chimed = true; chime(); }
+  }
+  homeTiles.material.color.setHex(0x6b5dde).lerp(new THREE.Color(0xc4bbff), egg.chimed ? Math.exp(-(perform - 4.3) * 1.5) : 0);
+  // everyone hops as they talk
+  [[husband, 'Cube'], [wife, 'Wife'], [baby, 'Baby'], [doctor, 'Dr']].forEach(([m, who]) => {
+    const h = hopOf(who);
+    if (who !== 'Cube' || relapse < 0) m.position.y = 0.08 * h;
+    m.userData.body.scale.y = (who === 'Dr' ? 1.1 : who === 'Baby' ? 0.38 : 1) * (1 - 0.05 * h);
+  });
+  // camera: close for the talk, wider once the doctor's in, then up overhead for the roll
+  const wide = smoother(clamp(since('doctor') / 1.5)), over = smoother(clamp(since('aside') / 2.5));
+  eggCam.position.set(-300 + 0.3 * Math.sin(e * 0.3), lerp(1.6, 2.1, wide), lerp(5.4, 6.6, wide));
+  eggCam.position.lerp(new THREE.Vector3(-300, 8.5, 3.6), over);
+  eggCam.lookAt(-300, lerp(0.8, 0, over), lerp(lerp(0, -0.2, wide), 0.6, over));
+  renderer.render(eggScene, eggCam);
+  // a quick dip to black for the doorbell cut, then the end card
+  const bell = H.cue('doorbell'), card = since('card');
+  const dip = t > bell.at && t < bell.at + bell.dur ? Math.sin(Math.PI * (t - bell.at) / bell.dur) : 0;
+  const black = Math.max(1 - clamp(t / 0.8), dip, clamp(card / 0.8));
+  if (black > 0) blackOver(black); else eggCanvas.style.display = 'none';
+  eggText.style.opacity = card > 0.9 ? clamp(Math.min((card - 0.9) * 2, (H.cue('card').dur - card) * 2)) : 0;
+  return true;
+}
+// show the current beat's caption, speak it once, and fire its cue
+function playBeats(scr, t, key, onCue) {
+  let i = scr.findIndex(b => t < b.at + b.dur);
+  if (i < 0) i = scr.length - 1;
+  const b = scr[i];
+  if (egg[key] !== i) {
+    egg[key] = i;
+    if (b.text) { caption.textContent = b.text; caption.style.opacity = 1; speak(b.who, b.text); } else caption.style.opacity = 0;
+    if (b.cue && onCue) onCue(b.cue);
+  }
+  return b;
+}
+// fade in from black at the start of a shot and out at its end
+function fadeEdges(e, from, to) {
+  const a = Math.max(1 - clamp((e - from) / 0.6), clamp((e - (to - 0.6)) / 0.6));
+  if (a > 0) blackOver(a); else eggCanvas.style.display = 'none';
+}
+function showOnly(group) { [street, office, inside, bedroom].forEach(g => (g.visible = g === group)); }
+function resetCar() {
+  car.visible = true;
+  driverCube.visible = true;
+  voxels.visible = false;
+  flyer.visible = false;
+  egg.burst = false;
+  egg.roll = -1;
+  stray.position.set(0.3, 0.65, STRAY_Z);
+  stray.rotation.y = 0.3;
+}
+function spinWheels(dist) { carWheels.forEach(w => (w.rotation.x -= dist / 0.3)); }
+// thrown clear of the wreck: a stand-in for the driver, at full size so it can roll home
+const flyer = new THREE.Mesh(cube.geometry, driverCube.material);
+flyer.visible = false;
+street.add(flyer);
+function crashNoise() {
+  const ac = eggAudio();
+  if (!ac) return;
+  const t = ac.currentTime, len = 0.9;
+  const buf = ac.createBuffer(1, ac.sampleRate * len, ac.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
+  const noise = ac.createBufferSource(), thump = ac.createOscillator(), filter = ac.createBiquadFilter(), gain = ac.createGain();
+  noise.buffer = buf;
+  filter.type = 'lowpass'; filter.frequency.value = 1800;
+  thump.frequency.setValueAtTime(140, t); thump.frequency.exponentialRampToValueAtTime(35, t + 0.5);
+  gain.gain.setValueAtTime(0.8 * settings.sfx, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + len);
+  noise.connect(filter); filter.connect(gain); thump.connect(gain);
+  gain.connect(ac.destination);
+  noise.start(t); thump.start(t); noise.stop(t + len); thump.stop(t + len);
+  // and the bits of car clattering down, in menu sounds
+  for (let i = 0; i < 8; i++) setTimeout(() => {
+    const c = hoverSnd.cloneNode(); c.preservesPitch = false; c.playbackRate = 0.5 + Math.random() * 1.2; c.volume = settings.sfx * 0.5; c.play().catch(() => {});
+  }, 120 + i * 70 + Math.random() * 60);
+}
+function blackOver(alpha) {
+  eggCanvas.style.display = 'block';
+  eggCanvas.width = innerWidth; eggCanvas.height = innerHeight;
+  eggCtx.fillStyle = `rgba(0,0,0,${alpha})`;
+  eggCtx.fillRect(0, 0, innerWidth, innerHeight);
+}
+
+// ======================= the Terms of Service, and what's at the bottom =======================
+// About 40,000 words of nothing, built from stock legal phrases. Scroll all the way down and it fades
+// to black and picks the story up five years later.
+const TOS_TOPICS = ['Definitions', 'Interpretation', 'Acceptance of Terms', 'Eligibility', 'Account Registration',
+  'Use of the Service', 'Restrictions', 'Intellectual Property', 'Licence Grant', 'User Content', 'Feedback',
+  'Third-Party Services', 'Fees', 'Taxes', 'Refunds', 'Term and Termination', 'Suspension', 'Disclaimers',
+  'Limitation of Liability', 'Indemnification', 'Governing Law', 'Dispute Resolution', 'Arbitration',
+  'Class Action Waiver', 'Severability', 'Waiver', 'Assignment', 'Notices', 'Force Majeure', 'Entire Agreement',
+  'Amendments', 'Survival', 'Headings', 'Counterparts', 'Export Controls', 'Data Retention', 'Cookies',
+  'Retention of Purple', 'Tile Placement', 'Rolling Conduct', 'Chime Rights', 'Memory Card Usage', 'Startup Duration'];
+const TOS_PARTS = [
+  ['Subject to the provisions of this Section and without prejudice to any other rights or remedies available,',
+   'Notwithstanding anything to the contrary contained herein or in any ancillary document,',
+   'To the maximum extent permitted by applicable law, and except as expressly set out in these Terms,',
+   'For the avoidance of doubt, and without limiting the generality of the foregoing,',
+   'Except where otherwise agreed in writing by a duly authorised representative of Gamesquare,',
+   'Unless the context otherwise requires, and in accordance with the definitions set out in Section 1,'],
+  ['the User', 'Gamesquare', 'the Licensee', 'any Affiliate of Gamesquare', 'each Party', 'the Account Holder',
+   'any person acting on behalf of the User', 'the Service Provider'],
+  ['shall not be liable for', 'hereby acknowledges and agrees to', 'shall be deemed to have accepted', 'shall use reasonable endeavours to procure',
+   'reserves the right, at its sole discretion, to modify', 'shall indemnify and hold harmless Gamesquare in respect of',
+   'shall promptly notify Gamesquare in writing of', 'may not sublicense, assign or otherwise transfer'],
+  ['any indirect, incidental, special or consequential losses', 'the continued availability of the Service',
+   'all obligations arising under or in connection with these Terms', 'any and all claims, demands, actions and proceedings',
+   'the accuracy, completeness or timeliness of any content', 'the rights granted under the Licence',
+   'any Material Breach of the obligations described herein', 'any interruption, suspension or termination of access'],
+  ['howsoever arising, whether in contract, tort (including negligence), breach of statutory duty or otherwise.',
+   'within thirty (30) days of the Effective Date, or such other period as Gamesquare may reasonably determine.',
+   'as may be amended, supplemented or replaced from time to time in accordance with Section 31.',
+   'provided always that such obligation shall not extend to matters outside the reasonable control of either Party.',
+   'and the User shall have no claim against Gamesquare in respect thereof.',
+   'save to the extent that such liability cannot be excluded or limited by law.'],
+];
+function tosText() {
+  let seed = 2001;
+  const pick = list => list[(seed = (seed * 48271) % 2147483647) % list.length];
+  let html = '<h1>GAMESQUARE TERMS OF SERVICE</h1><p style="text-align:center">Last updated: the 14th of the month following the month in which they were last updated.</p>';
+  for (let n = 1; n <= 120; n++) {
+    html += `<h2>Section ${n}. ${TOS_TOPICS[(n - 1) % TOS_TOPICS.length]}</h2>`;
+    const paras = 3 + (n % 4);
+    for (let p = 1; p <= paras; p++) {
+      let text = `${n}.${p} `;
+      const sentences = 4 + ((n + p) % 4);
+      for (let k = 0; k < sentences; k++) text += TOS_PARTS.map(pick).join(' ') + ' ';
+      // two clauses for anyone actually reading
+      if (n === 61 && p === 2) text += 'The Cube is not responsible for any rolling that may occur on or near your floor. ';
+      if (n === 119 && p === 1) text += 'If you have read this far, you are the first. He has been waiting. ';
+      html += `<p>${text}</p>`;
+    }
+  }
+  return html + '<p style="text-align:center;margin-top:40px">— End of Terms —</p>';
+}
+const tos = document.getElementById('tos'), tosScroll = document.getElementById('tosScroll');
+let tosOpen = false, tosDone = false;
+function openTos() {
+  if (!document.getElementById('tosBody').innerHTML) document.getElementById('tosBody').innerHTML = tosText();
+  tosScroll.scrollTop = 0;
+  tosOpen = true;
+  tosDone = false;
+  tos.classList.add('on');
+  placeThumb();
+}
+function closeTos() { tosOpen = false; tos.classList.remove('on'); }
+function tosKey(e) {
+  const k = e.key.toLowerCase(), page = tosScroll.clientHeight * 0.9;
+  if (k === 'tab' || k === 'escape') { e.preventDefault(); closeTos(); return; }
+  const by = { arrowdown: 60, s: 60, arrowup: -60, w: -60, pagedown: page, ' ': page, pageup: -page, end: 1e9, home: -1e9 }[k];
+  if (by !== undefined) { e.preventDefault(); tosScroll.scrollTop += by; }
+}
+// the scrubber: the thumb follows the page, and dragging the bar moves the page
+const tosBar = document.getElementById('tosBar'), tosThumb = document.getElementById('tosThumb'), tosPct = document.getElementById('tosPct');
+function placeThumb() {
+  const max = tosScroll.scrollHeight - tosScroll.clientHeight, f = max > 0 ? tosScroll.scrollTop / max : 0;
+  tosThumb.style.top = f * (tosBar.clientHeight - tosThumb.offsetHeight) + 'px';
+  tosPct.textContent = Math.floor(f * 100) + '%';
+}
+function scrubTo(clientY) {
+  const r = tosBar.getBoundingClientRect(), f = clamp((clientY - r.top - tosThumb.offsetHeight / 2) / (r.height - tosThumb.offsetHeight));
+  tosScroll.scrollTop = f * (tosScroll.scrollHeight - tosScroll.clientHeight);
+}
+tosBar.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  tosBar.setPointerCapture(e.pointerId);
+  scrubTo(e.clientY);
+  const move = ev => scrubTo(ev.clientY);
+  tosBar.addEventListener('pointermove', move);
+  tosBar.addEventListener('pointerup', () => tosBar.removeEventListener('pointermove', move), { once: true });
+});
+tosScroll.addEventListener('scroll', placeThumb);
+tosScroll.addEventListener('scroll', () => {
+  if (tosDone || tosScroll.scrollTop + tosScroll.clientHeight < tosScroll.scrollHeight - 4) return;
+  tosDone = true;   // they read it all. or held End. either way:
+  fade.style.opacity = 1;
+  setTimeout(() => { closeTos(); startSequel(); fade.style.opacity = 0; }, 900);
+});
+
+// ---- five years later: new sets and characters ----
+const bedroom = new THREE.Group();
+bedroom.position.set(600, 0, 0);
+eggScene.add(bedroom);
+const roomFloor = new THREE.InstancedMesh(new THREE.BoxGeometry(0.94, 0.04, 0.94), new THREE.MeshLambertMaterial({ color: 0x33296e }), 10 * 7);
+for (let i = 0; i < 70; i++) roomFloor.setMatrixAt(i, new THREE.Matrix4().makeTranslation((i % 10) - 4.5, 0, -Math.floor(i / 10) + 2));
+const roomWall = new THREE.Mesh(new THREE.PlaneGeometry(12, 6), new THREE.MeshLambertMaterial({ color: 0x241b52 }));
+roomWall.position.set(0, 3, -4.5);
+const bed = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.5, 1.3), new THREE.MeshLambertMaterial({ color: 0x5546d6 }));
+bed.position.set(-2.6, 0.25, -3.2);
+const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.18, 0.5), new THREE.MeshLambertMaterial({ color: 0xe8e4ff }));
+pillow.position.set(-3.4, 0.6, -3.2);
+const mirrorFrame = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.3), new THREE.MeshLambertMaterial({ color: 0x8f7cff }));
+mirrorFrame.position.set(1.6, 1.6, -4.48);
+const mirror = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 2.1), new THREE.MeshBasicMaterial({ color: 0xd8d4f0 }));
+mirror.position.set(1.6, 1.6, -4.47);
+const roomLight = new THREE.PointLight(0xfff0e0, 0.7, 12);
+roomLight.position.set(0, 3.5, 1);
+bedroom.add(roomFloor, roomWall, bed, pillow, mirrorFrame, mirror, roomLight);
+// headphones for the teenager
+function headphones(size) {
+  const g = new THREE.Group(), mat = new THREE.MeshLambertMaterial({ color: 0x1a1530 });
+  const band = new THREE.Mesh(new THREE.TorusGeometry(size * 0.58, size * 0.06, 8, 24, Math.PI), mat);
+  band.position.y = size * 0.55;
+  [-1, 1].forEach(sd => {
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(size * 0.2, size * 0.2, size * 0.14, 16), mat);
+    cup.rotation.z = Math.PI / 2;
+    cup.position.set(sd * size * 0.56, size * 0.5, 0);
+    g.add(cup);
+  });
+  g.add(band);
+  return g;
+}
+const AGED = 0x8c86b8, TEEN = 0xb4a8ff, WHITE = 0xf4f2ff;
+const dadRoom = homeBlock(AGED, 0x2a264a), wifeRoom = homeBlock(0xff7ac0, 0x5a1a40), teenRoom = homeBlock(WHITE, 0x5a5a6a);
+teenRoom.userData.body.scale.setScalar(0.7);
+teenRoom.userData.body.position.y = 0.35;
+teenRoom.add(headphones(0.7));
+bedroom.add(dadRoom, wifeRoom, teenRoom);
+// the baby has grown into a teenager with headphones
+const teenPhones = headphones(0.7);
+baby.add(teenPhones);
+teenPhones.visible = false;
+// outside: him (older), the newspaper, and Gary from next door
+const dadOut = homeBlock(AGED, 0x2a264a), gary = homeBlock(0x9fe3d5, 0x1f4a44);
+[dadOut, gary].forEach(m => { m.userData.body.scale.setScalar(0.8); m.userData.body.position.y = 0.4; });
+const paper = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.2), new THREE.MeshLambertMaterial({ color: 0xe8e4ff }));
+street.add(dadOut, gary, paper);
+[dadOut, gary, paper].forEach(m => (m.visible = false));
+// breakfast: a table and a (circular) cake
+const table = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.55, 0.9), new THREE.MeshLambertMaterial({ color: 0x8f7cff, emissive: 0x1a1450 }));
+table.position.set(0, 0.275, 0.3);
+const cake = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.22, 28), new THREE.MeshLambertMaterial({ color: 0xffd1ea }));
+cake.position.set(0, 0.66, 0.3);
+const candle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, 0.04), new THREE.MeshBasicMaterial({ color: 0xffc86b }));
+candle.position.set(0, 0.85, 0.3);
+inside.add(table, cake, candle);
+[table, cake, candle].forEach(m => (m.visible = false));
+// the teenager's white tiles
+const whiteTiles = new THREE.InstancedMesh(new THREE.BoxGeometry(0.8, 0.03, 0.8), new THREE.MeshBasicMaterial({ color: 0xf4f2ff }), 12);
+whiteTiles.count = 0;
+inside.add(whiteTiles);
+// a soft, bright two-note "ding": definitely not anybody's trademark
+function ding(big) {
+  const ac = eggAudio();
+  if (!ac) return;
+  const t = ac.currentTime, gain = ac.createGain();
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.22 * settings.sfx), t + 0.02);   // can't ramp to exactly 0
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + (big ? 2.2 : 0.9));
+  gain.connect(ac.destination);
+  (big ? [1046.5, 1318.5, 1568, 2093] : [1318.5, 1975.5]).forEach((f, i) => {
+    const o = ac.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = f;
+    o.connect(gain);
+    o.start(t + i * 0.06);
+    o.stop(t + 2.4);
+  });
+}
+
+// ---- the sequel's scripts ----
+const NEIGHBOR = script([
+  [null, null, 1.4],
+  [null, null, 2.4, 'paper'],
+  ['Gary', 'Morning!', 2],
+  ['Cube', 'Morning, Gary.', 2.2],
+  ['Gary', 'Still clean?', 2.2],
+  ['Cube', 'Five years on Tuesday.', 2.6],
+  ['Gary', 'Proud of you, buddy. Real proud.', 2.8],
+  ['Gary', "Hey, is your kid okay? He's been glowing.", 3.2],
+  ['Cube', 'Glowing?', 2],
+  ['Gary', 'White. Kind of a soft white.', 2.8],
+  ['Cube', '...Teenagers.', 2.4],
+  ['Gary', 'Also he keeps waving at my TV.', 2.8],
+  [null, null, 1.8, 'goin'],
+]);
+const BREAKFAST = script([
+  [null, null, 1],
+  ['Wife', 'Five years clean. I made you a cake.', 3.2],
+  ['Cube', 'Is it shaped like anything?', 2.6],
+  ['Wife', "It's a circle. Circles are safe.", 3],
+  ['Cube', 'Thank you, honey.', 2.2],
+  ['Teen', 'Can I have some?', 2.2],
+  ['Wife', 'After breakfast.', 2.2],
+  ['Teen', 'Dad, what was a GameCube?', 2.8],
+  [null, null, 2, 'freeze'],
+  ['Cube', '...A lunchbox.', 2.4],
+  ['Wife', 'A lunchbox, sweetie. With a handle.', 3],
+  ['Teen', 'Can I be excused? I have... a thing.', 3],
+  ['Wife', 'What thing?', 2],
+  ['Teen', 'A homework thing.', 2.4, 'teenleaves'],
+  [null, null, 2.4],
+  [null, '[a soft, bright ding from upstairs]', 2.8, 'ding'],
+  ['Wife', '...What was that?', 2.2],
+  ['Cube', 'That sounded... white.', 2.6],
+  [null, null, 1.2],
+]);
+const ROOM = script([
+  [null, null, 1.2],
+  [null, null, 2.4, 'wave'],
+  ['Teen', "It's not what it looks like.", 2.6],
+  ['Wife', "You're WHITE.", 2.2],
+  ['Teen', "I'm expressing myself.", 2.4],
+  ['Cube', 'Son... is that a Wii?', 2.6],
+  ['Teen', "It's called motion controls, Dad.", 2.8],
+  [null, null, 2.2, 'faint'],
+  ['Cube', 'Honey?', 1.8],
+  ['Teen', 'Is Mom okay?', 2],
+  ['Cube', "She'll be fine. She's done this since the Virtual Boy.", 3.4],
+  ['Teen', 'Grandpa was a Virtual Boy?', 2.6],
+  ['Cube', "We don't talk about Grandpa.", 2.6],
+  [null, null, 1],
+]);
+const MEETING = script([
+  [null, null, 1.4, 'doorbell'],
+  ['Dr', "Hello again. I'm a Memory Card. 251 blocks now.", 3.4],
+  ['Dr', 'I got an upgrade.', 2.2],
+  ['Wife', 'It happened again, Doctor.', 2.6],
+  ['Dr', 'It happens. Sometimes it skips a generation.', 3.2],
+  ['Dr', 'Sometimes it skips a console.', 2.6],
+  ['Teen', 'Wii is the future.', 2.2],
+  ['Cube', 'In this house, we boot PURPLE.', 2.8],
+  ['Teen', 'Your startup is four seconds, Dad. Mine has a Mii.', 3.4],
+  ['Cube', 'A what?', 1.8],
+  ['Teen', 'A little guy. He waves at you.', 2.8],
+  ['Cube', '...Why would anyone want to be waved at.', 3],
+  ['Wife', 'Over my dead tiles.', 2.4],
+  ['Dr', 'There is one treatment for this.', 2.8],
+  ['Wife', "Don't you say it.", 2.2],
+  ['Dr', 'A startup-off.', 2.6],
+  ['Wife', 'He said it.', 2],
+  [null, null, 1],
+]);
+const SHOWDOWN = script([
+  [null, null, 1.8, 'positions'],
+  ['Dr', 'Gentlemen. Boot when ready.', 2.6],
+  [null, null, 5.6, 'dadroll'],
+  [null, null, 5.2, 'teenroll'],
+  [null, null, 1.6],
+  ['Wife', '...', 1.6],
+  ['Wife', 'I hate that I enjoyed both.', 3],
+  ['Dr', 'This is a breakthrough.', 2.4],
+  ['Dr', 'For me. I am writing a book.', 2.8],
+]);
+const ENDING = script([
+  [null, null, 0.8],
+  ['Teen', 'Dad... can you teach me the roll?', 3],
+  ['Cube', '...Only on weekends.', 2.6],
+  ['Teen', 'Can you teach me the chime?', 2.6],
+  ['Cube', "The chime can't be taught. The chime chooses you.", 3.6],
+  ['Wife', "I'm going to my sister's.", 2.4, 'wifeleaves'],
+  ['Dr', 'Can I have her room?', 2.4],
+  ['Cube', 'No.', 1.6],
+  ['Dr', 'Can I have the cake?', 2.4],
+  ['Cube', '...Yes.', 2],
+  [null, null, 1.4],
+  [null, null, 6.5, 'card'],
+]);
+// the sequel, scene by scene: [script, starts at]
+const SEQ = [];
+{
+  let at = 3.6;   // after "5 years later"
+  [NEIGHBOR, BREAKFAST, ROOM, MEETING, SHOWDOWN, ENDING].forEach(s => { SEQ.push([s, at]); at += s.total; });
+  SEQ.end = at;
+}
+
+function startSequel() {
+  egg.active = true;
+  egg.sequel = true;
+  egg.start = performance.now() / 1000;
+  egg.flags = {};
+  egg.music = false;
+  for (let i = 0; i < 6; i++) delete egg['seq' + i];
+  eggText.textContent = '5 years later';
+  husband.userData.body.material.color.setHex(AGED);
+  baby.userData.body.scale.setScalar(0.7);
+  baby.userData.body.position.y = 0.35;
+  teenPhones.visible = true;
+  doctor.userData.label = true;
+  label59.material.map = cardLabelText('251');
+  homeTiles.count = whiteTiles.count = babyTiles.count = 0;
+  menu.volume = 0;
+}
+function endSequel() {
+  egg.active = false;
+  egg.sequel = false;
+  husband.userData.body.material.color.setHex(0x9b8cff);
+  baby.userData.body.material.color.setHex(0xc4bbff);
+  baby.userData.body.scale.setScalar(0.38);
+  baby.userData.body.position.y = 0.19;
+  teenPhones.visible = false;
+  label59.material.map = cardLabelText('59');
+  wife.rotation.z = 0;
+  [dadOut, gary, paper, table, cake, candle].forEach(m => (m.visible = false));
+  homeTiles.count = whiteTiles.count = 0;
+  eggCanvas.style.display = 'none';
+  eggText.style.opacity = 0;
+  caption.style.opacity = 0;
+  menu.volume = settings.music;
+  if (menu.paused) menu.play().catch(() => {});
+  chunkIn();   // back to Settings
+}
+function cardLabelText(text) {
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 96;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#e8e4ff'; g.fillRect(0, 0, 128, 96);
+  g.fillStyle = '#3b2fa0'; g.font = `bold ${text.length > 2 ? 36 : 44}px "Helvetica Neue", Arial, sans-serif`;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 64, 50);
+  return new THREE.CanvasTexture(cv);
+}
+
+// shared bits for each scene: run the beats, and know who's talking
+function sceneBeats(scr, t, key, onCue) {
+  const b = playBeats(scr, t, 'seq' + key, onCue);
+  const talking = who => b.who === who && t - b.at < Math.min(1.7, b.dur - 0.3);
+  return { b, hop: who => (talking(who) ? Math.abs(Math.sin(performance.now() / 1000 * 17)) : 0), since: cue => t - scr.cue(cue).at };
+}
+function bob(m, h, base = 0) { m.position.y = base + 0.08 * h; }
+
+function sequelFrame() {
+  const e = performance.now() / 1000 - egg.start;
+  if (e >= SEQ.end) { endSequel(); return false; }
+  const F = egg.flags;
+  if (!egg.music && e > 3.6) { egg.music = true; menu.currentTime = 0; menu.play().catch(() => {}); }
+
+  // 5 years later
+  if (e < 3.6) {
+    renderer.setClearColor(0x000000);
+    renderer.clear();
+    eggText.style.opacity = clamp(Math.min(e * 1.5, (3.6 - e) * 1.5));
+    return true;
+  }
+  eggText.style.opacity = 0;
+  const [scr, from] = SEQ.find(([s, at]) => e < at + s.total) || SEQ[SEQ.length - 1];
+  const t = e - from, to = from + scr.total, key = SEQ.findIndex(([s]) => s === scr);
+  const at = (x, y, z) => new THREE.Vector3(x, y, z);
+
+  if (scr === NEIGHBOR) {
+    showOnly(street);
+    setTimeOfDay(0);
+    stray.visible = car.visible = voxels.visible = flyer.visible = false;
+    menu.volume = settings.music * 0.5 * clamp(t / 1.5);
+    [dadOut, gary, paper].forEach(m => (m.visible = true));
+    const { hop, since } = sceneBeats(scr, t, key);
+    // out the door, over to the paper, back in with it
+    const out = smoother(clamp(t / 1.4)), toPaper = smoother(clamp(since('paper') / 1.6)), back = smoother(clamp(since('goin') / 1.6));
+    const door = at(0, 0, DOOR_Z - 0.2), step = at(0, 0, DOOR_Z - 1.4), paperSpot = at(0.9, 0, DOOR_Z - 3.2);
+    dadOut.position.copy(door).lerp(step, out).lerp(paperSpot.clone().add(at(-0.5, 0, 0)), toPaper).lerp(door, back);
+    dadOut.position.y = 0.12 * Math.abs(Math.sin(t * 9)) * (out < 1 || (toPaper > 0 && toPaper < 1) || (back > 0 && back < 1) ? 1 : 0) + 0.08 * hop('Cube');
+    dadOut.visible = back < 0.98;
+    paper.position.copy(toPaper < 1 ? paperSpot.clone().setY(0.06) : dadOut.position.clone().add(at(0.42, 0.45, 0)));
+    paper.visible = back < 0.98;
+    gary.position.set(3.7, 0.08 * hop('Gary') + 0.1 * Math.max(0, Math.sin(t * 2)) * (t < 6 ? 1 : 0), DOOR_Z - 4.2);
+    eggCam.position.set(-3.6 + 0.2 * Math.sin(e * 0.3), 2.3, DOOR_Z - 7.5);
+    eggCam.lookAt(1, 0.7, DOOR_Z - 2.6);
+    renderer.render(eggScene, eggCam);
+    fadeEdges(e, from, to);
+    return true;
+  }
+  [dadOut, gary, paper].forEach(m => (m.visible = false));
+
+  if (scr === BREAKFAST || scr === MEETING || scr === SHOWDOWN || scr === ENDING) {
+    showOnly(inside);
+    const cues = {
+      ding: () => ding(false), doorbell: () => { playSelect(); setTimeout(playSelect, 380); },
+      card: () => { caption.style.opacity = 0; eggText.innerHTML = 'He has been clean for 0 days.<br>Again.'; },
+    };
+    const { b, hop, since } = sceneBeats(scr, t, key, c => cues[c] && cues[c]());
+    const body = husband.userData.body, teenBody = baby.userData.body;
+    body.quaternion.identity();
+    teenBody.quaternion.identity();
+    wife.rotation.z = 0;
+    doctor.visible = scr !== BREAKFAST;
+    [table, cake, candle].forEach(m => (m.visible = scr === BREAKFAST || scr === ENDING));
+    teenBody.material.color.setHex(scr === BREAKFAST ? TEEN : WHITE);
+    baby.visible = true;
+    let cam = [at(-300 + 0.3 * Math.sin(e * 0.3), 1.9, 6), at(-300, 0.7, 0)];
+    if (scr !== SHOWDOWN) { homeTiles.count = 0; whiteTiles.count = 0; }
+
+    if (scr === BREAKFAST) {
+      const frozen = since('freeze') > 0 && since('freeze') < scr.cue('freeze').dur;
+      menu.volume = frozen ? 0 : settings.music * 0.35 * clamp(t / 1.5);
+      husband.position.set(-1.5, frozen ? 0 : 0.08 * hop('Cube'), 0.3); husband.rotation.y = Math.PI / 2;
+      wife.position.set(1.5, frozen ? 0 : 0.08 * hop('Wife'), 0.3); wife.rotation.y = -Math.PI / 2;
+      const leave = smoother(clamp(since('teenleaves') / 1.8));
+      baby.position.set(lerp(0, 5.5, leave), (frozen ? 0 : 0.08 * hop('Teen')) + 0.1 * Math.abs(Math.sin(t * 9)) * (leave > 0 && leave < 1 ? 1 : 0), 1.25);
+      baby.rotation.y = Math.PI;
+    }
+    if (scr === MEETING) {
+      menu.volume = settings.music * 0.3;
+      husband.position.set(-1.6, 0.08 * hop('Cube'), 0.3); husband.rotation.y = 0.5;
+      wife.position.set(1.6, 0.08 * hop('Wife'), 0.3); wife.rotation.y = -0.5;
+      baby.position.set(0.1, 0.08 * hop('Teen'), 1.6); baby.rotation.y = 0;
+      baby.rotation.z = Math.sin(e * 6) * 0.08;   // won't stop doing the motion-control thing
+      const arrive = smoother(clamp(since('doorbell') / 1.4));
+      doctor.position.set(lerp(5, 0.2, arrive), 0.08 * hop('Dr'), -1.5);
+      doctor.rotation.y = 0;
+      cam = [at(-300 + 0.3 * Math.sin(e * 0.3), 2.2, 6.8), at(-300, 0.7, -0.2)];
+      const bell = scr.cue('doorbell');
+      if (t < bell.dur) blackOver(Math.sin(Math.PI * t / bell.dur) * 0.9);
+    }
+    if (scr === SHOWDOWN) {
+      menu.volume = settings.music * 0.15;
+      const spots = smoother(clamp(t / 1.6));
+      const dadCells = logoCells(-2.6, 0.4, 1);
+      const circle = Array.from({ length: 12 }, (_, i) => at(2.8 + 1.5 * Math.sin(i / 12 * Math.PI * 2), 0, 0.4 - 1.5 * Math.cos(i / 12 * Math.PI * 2)));
+      wife.position.set(-0.6, 0.08 * hop('Wife'), -3.3); wife.rotation.y = 0;
+      doctor.position.set(0.8, 0.08 * hop('Dr'), -3.4); doctor.rotation.y = 0;
+      // dad: over to the start, then the whole purple logo, then the chime
+      const dr = since('dadroll');
+      if (dr < 0) {
+        husband.position.copy(at(-1.6, 0, 0.3)).lerp(dadCells[0], spots); husband.rotation.y = 0;
+        homeTiles.count = 0; F.dadLanded = 0; F.dadChime = false;
+      } else {
+        const r = rollAlong(dadCells, 1, dr - 0.3, 0.27, homeTiles, n => { if (n > F.dadLanded) { F.dadLanded = n; thud(0.55); } });
+        husband.rotation.y = 0;
+        husband.position.copy(r.center).setY(r.center.y - 0.5);
+        body.quaternion.copy(r.q);
+        if (r.done && !F.dadChime) { F.dadChime = true; chime(); }
+      }
+      homeTiles.material.color.setHex(0x6b5dde);
+      // the son: a hopping circle of white tiles, a ding on each, a big ding at the end
+      const tr = since('teenroll'), hopT = 0.36;
+      if (tr < 0) {
+        baby.position.copy(at(0.1, 0, 1.6)).lerp(circle[0], spots); baby.rotation.set(0, 0, 0);
+        whiteTiles.count = 0; F.teenLanded = 0; F.teenDing = false;
+      } else {
+        const u = tr / hopT, k = Math.min(11, Math.floor(u)), f = u >= 11 ? 1 : u - k;
+        const a = circle[k], c = circle[Math.min(11, k + 1)];
+        baby.position.copy(a).lerp(c, smoother(f));
+        baby.position.y = Math.sin(Math.PI * f) * 0.6 * (u < 11 ? 1 : 0);
+        baby.rotation.y = -k / 12 * Math.PI * 2;
+        const landed = Math.min(12, Math.floor(u) + 1);
+        whiteTiles.count = landed;
+        circle.slice(0, landed).forEach((p, i) => whiteTiles.setMatrixAt(i, new THREE.Matrix4().makeTranslation(p.x, 0.03, p.z)));
+        whiteTiles.instanceMatrix.needsUpdate = true;
+        if (landed > F.teenLanded) { F.teenLanded = landed; ding(false); }
+        if (u >= 11.5 && !F.teenDing) { F.teenDing = true; ding(true); }
+      }
+      cam = [at(-300, 9.5, 4.4), at(-300, 0, 0.2)];
+    }
+    if (scr === ENDING) {
+      menu.volume = settings.music * 0.3 * (since('card') > 0 ? 0 : 1);
+      husband.position.set(-1.3, 0.08 * hop('Cube'), 0.9); husband.rotation.y = 0.5;
+      baby.position.set(0.2, 0.08 * hop('Teen'), 1.6); baby.rotation.set(0, -0.4, 0);
+      const go = smoother(clamp(since('wifeleaves') / 2));
+      wife.position.set(lerp(1.6, 6, go), 0.08 * hop('Wife') + 0.1 * Math.abs(Math.sin(t * 9)) * (go > 0 && go < 1 ? 1 : 0), 0.4); wife.rotation.y = -0.5;
+      doctor.position.set(1.2, 0.08 * hop('Dr'), -1.2); doctor.rotation.y = -0.2;
+      cake.position.y = 0.66;
+    }
+    eggCam.position.copy(cam[0]);
+    eggCam.lookAt(cam[1]);
+    renderer.render(eggScene, eggCam);
+    const card = scr === ENDING ? since('card') : -1;
+    const black = Math.max(1 - clamp(t / 0.6), scr === ENDING ? clamp(card / 0.8) : clamp((t - (scr.total - 0.6)) / 0.6));
+    if (scr === MEETING && t < scr.cue('doorbell').dur) { /* the doorbell dip already drew */ }
+    else if (black > 0) blackOver(black); else eggCanvas.style.display = 'none';
+    if (card > 0.9) eggText.style.opacity = clamp(Math.min((card - 0.9) * 2, (scr.cue('card').dur - card) * 2));
+    return true;
+  }
+
+  if (scr === ROOM) {
+    showOnly(bedroom);
+    menu.volume = settings.music * 0.25;
+    const { hop, since } = sceneBeats(scr, t, key, c => { if (c === 'wave') ding(false); if (c === 'faint') setTimeout(() => thud(0.45), 350); });
+    // the son, white, waving at the mirror; his parents in the doorway
+    const wave = since('wave') > 0 ? Math.sin(e * 7) * 0.35 : 0;
+    teenRoom.position.set(1.4, 0.08 * hop('Teen'), -2.4);
+    teenRoom.rotation.set(0, since('wave') > 2.4 ? 0.9 : Math.PI, wave * (since('wave') < 2.4 ? 1 : 0.3));
+    dadRoom.position.set(-2.3, 0.08 * hop('Cube'), 0.4); dadRoom.rotation.y = -0.6;
+    const faint = smoother(clamp(since('faint') / 0.5));
+    wifeRoom.position.set(-1, faint ? 0 : 0.08 * hop('Wife'), 0.9);
+    wifeRoom.rotation.set(0, -0.3, faint * Math.PI / 2);   // keels over sideways
+    const push = smoother(clamp(t / 3));
+    eggCam.position.set(600 + 0.4 + push * 0.3, 3, 6.4 - push * 0.8);
+    eggCam.lookAt(600 - 0.3, 0.7, -1);
+    renderer.render(eggScene, eggCam);
+    fadeEdges(e, from, to);
+    return true;
+  }
+  return true;
+}
+
+// ======================= easter eggs =======================
+// a line of text at the bottom of the screen for a few seconds
+let quipTimer = 0;
+function quip(text, seconds = 3.4) {
+  caption.textContent = text;
+  caption.style.opacity = 1;
+  clearTimeout(quipTimer);
+  quipTimer = setTimeout(() => (caption.style.opacity = 0), seconds * 1000);
+}
+const menuShowing = () => running && !waiting && !cardView.open && !egg.active && !tosOpen && !emuBox.classList.contains('on') && now() >= OUT + APPROACH;
+const mischief = { konamiAt: -9, shakeUntil: 0, shake: 0, stormAt: -9, pokes: 0, lastPoke: 0, lastInput: performance.now(), asleep: false, sleepiness: 0,
+  hopAt: -9, dizzyAt: -9, swirl: 0, lastAngle: null, lastSwirl: 0, emptyDeletes: 0, topBumps: 0, bottomBumps: 0, flips: [] };
+
+// the Konami code: a big pointless spin
+const KONAMI = ['arrowup', 'arrowup', 'arrowdown', 'arrowdown', 'arrowleft', 'arrowright', 'arrowleft', 'arrowright', 'b', 'a'];
+let keyTrail = [], typed = '';
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  keyTrail = keyTrail.concat(k).slice(-KONAMI.length);
+  if (k.length === 1) typed = (typed + k).slice(-10);
+  if (!menuShowing()) return;
+  if (keyTrail.join() === KONAMI.join()) {
+    keyTrail = [];
+    mischief.konamiAt = performance.now() / 1000;
+    sfx(centerSnd);
+    quip("Cheat activated: nothing. This isn't that kind of console.");
+  }
+  // say the forbidden name
+  if (typed.endsWith('skyler') && !skyler) { typed = ''; skylerMode(); quip("Skylersquare mode. There's no going back."); }
+  if (typed.endsWith('lunchbox')) {
+    typed = '';
+    handle.visible = !handle.visible;
+    sfx(selectSnd);
+    if (handle.visible) quip("It's a lunchbox, sweetie. With a handle.");
+  }
+  if (typed.endsWith('chime')) { typed = ''; menuChime(); mischief.hopAt = performance.now() / 1000; quip('The chime chooses you.'); }
+  if (typed.endsWith('wii')) { typed = ''; flash('#fff'); quip("Don't you DARE say that name in this house."); }
+  if (typed.endsWith('purple')) { typed = ''; flash('#6b5dde'); quip('In this house, we boot PURPLE.'); }
+  for (const name of Object.keys(VISITORS)) if (typed.endsWith(name)) { typed = ''; visit(name); }
+  if (typed.endsWith('voxels')) { typed = ''; mischief.burstAt = performance.now() / 1000; crashNoise(); setTimeout(() => quip("...I'm fine. Everything's fine."), 2300); }
+  if (typed.endsWith('help')) { typed = ''; turnItOffAndOn(); }
+  if (typed.endsWith('lammy')) { typed = ''; mischief.lammyAt = performance.now() / 1000; quip('Lammy would be proud.'); }
+  if (typed.endsWith('cake')) { typed = ''; cakeTop.visible = !cakeTop.visible; if (cakeTop.visible) quip("It's a circle. Circles are safe."); }
+  if (typed.endsWith('dance')) { typed = ''; mischief.danceAt = performance.now() / 1000; quip('\u266a'); }
+  if (typed.endsWith('sleep')) { typed = ''; setTimeout(() => (mischief.lastInput = performance.now() - 91000), 0); }
+  if (typed.endsWith('251')) { typed = ''; quip('251 blocks. I got an upgrade.'); }
+  if (typed.endsWith('secret')) { typed = ''; quip('The real secret was the friends we rolled along the way.', 4.5); }
+  if (typed.endsWith('credits')) { typed = ''; rollCredits(); }
+  if (k === 'escape' && ++mischief.escapes === 5) { mischief.escapes = 0; quip("There's no escape. Only startup."); }
+});
+
+// poking the cube: it puts up with nine
+addEventListener('pointerdown', e => {
+  if (!menuShowing()) return;
+  mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  if (!ray.intersectObject(glassMesh).length) return;
+  const t = performance.now() / 1000;
+  mischief.pokes = t - mischief.lastPoke > 4 ? 1 : mischief.pokes + 1;
+  mischief.lastPoke = t;
+  mischief.shakeUntil = t + 0.35;
+  mischief.shake = 0.04;
+  thud(1 + mischief.pokes * 0.04);
+  if (mischief.pokes === 10) { quip("Stop poking me. I'm a startup, not a stress ball."); mischief.shake = 0.12; mischief.shakeUntil = t + 0.8; }
+  if (mischief.pokes === 20) {
+    quip("That's it. I'm leaving.");
+    mischief.stormAt = t;
+    mischief.pokes = 0;
+    setTimeout(() => quip('...I came back. I have nowhere else to go.'), 4300);
+  }
+});
+
+// leave it alone long enough and it nods off
+['keydown', 'pointerdown', 'pointermove', 'wheel'].forEach(type => addEventListener(type, () => {
+  mischief.lastInput = performance.now();
+  if (mischief.asleep) {
+    mischief.asleep = false;
+    quip("I'm up. I'm up. I was just loading.");
+  }
+}, true));
+
+
+// circle the mouse around the cube and it gets dizzy
+addEventListener('pointermove', e => {
+  if (!menuShowing()) return;
+  const a = Math.atan2(e.clientY - innerHeight / 2, e.clientX - innerWidth / 2), t = performance.now() / 1000;
+  if (mischief.lastAngle !== null && t - mischief.lastSwirl < 0.4) {
+    let d = a - mischief.lastAngle;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    mischief.swirl = mischief.swirl * Math.exp(-(t - mischief.lastSwirl) * 0.3) + d;
+  } else mischief.swirl = 0;
+  mischief.lastAngle = a;
+  mischief.lastSwirl = t;
+  if (Math.abs(mischief.swirl) > Math.PI * 2 * 4) {   // four laps
+    mischief.swirl = 0;
+    mischief.dizzyAt = t;
+    quip('Please. I have a family.');
+  }
+});
+
+// the chime on request (a copy of the startup sound, so the intro's clock isn't touched)
+function menuChime() {
+  const c = audio.cloneNode();
+  c.volume = settings.sfx;
+  c.addEventListener('loadedmetadata', () => { c.currentTime = 4.15; c.play().catch(() => {}); }, { once: true });
+  c.load();
+}
+// a carrying handle, for the lunchbox
+const handle = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.035, 10, 28, Math.PI), new THREE.MeshLambertMaterial({ color: 0x8f7cff, emissive: 0x2a1f70 }));
+handle.position.y = 0.5;
+handle.visible = false;
+ghost.add(handle);
+
+// hold R: rainbow startup
+let rainbow = false;
+function rainbowMode() { rainbow = true; document.getElementById('title').classList.add('rainbow'); }
+// Halloween and Christmas (?date=10-31 previews a day)
+function holidayOn() {
+  const forced = new URLSearchParams(location.search).get('date'), d = new Date();
+  const md = forced || `${d.getMonth() + 1}-${d.getDate()}`;
+  return { '10-31': 'halloween', '12-25': 'christmas', '4-1': 'aprilfools', '04-01': 'aprilfools' }[md] || null;
+}
+const HOLIDAY = holidayOn();
+if (HOLIDAY === 'aprilfools') document.querySelectorAll('#title .logo span').forEach(sp => (sp.textContent = 'GAMESQUARE (TRIAL)'));
+const PUMPKIN = new THREE.Color(0xff8a1e), PUMPKIN_LIT = new THREE.Color(0xffd08a), RED = new THREE.Color(0xe0303a), GREEN = new THREE.Color(0x2f9e4f);
+function paintSpecial(t) {
+  if (skyler) return;
+  const all = [...tiles, core];
+  if (rainbow) {
+    all.forEach((m, i) => m.material.color.setHSL((i / all.length + t * 0.25) % 1, 0.75, 0.6));
+    cube.material.color.setHSL((t * 0.25) % 1, 0.7, 0.72);
+  } else if (HOLIDAY === 'halloween') {
+    all.forEach(m => m.material.color.lerp(PUMPKIN, 0.85));
+    cube.material.color.copy(PUMPKIN_LIT);
+  } else if (HOLIDAY === 'christmas') {
+    all.forEach((m, i) => m.material.color.lerp(i % 2 ? RED : GREEN, 0.8));
+    cube.material.color.setHex(0xf2f2f6);
+  }
+}
+
+// hold G: the startup, backwards, then the real one
+let rewind = null, reversedStart = null;
+const REWIND_FROM = CHIME + 1.2;
+fetch('start.mp3').then(r => r.arrayBuffer()).then(buf => eggAudio() && eggAudio().decodeAudioData(buf)).then(ab => {
+  if (!ab) return;
+  for (let c = 0; c < ab.numberOfChannels; c++) ab.getChannelData(c).reverse();
+  reversedStart = ab;
+}).catch(() => {});
+function startRewind() {
+  running = true;
+  whooshed = true;
+  rewind = { at: performance.now() / 1000 };
+  const ac = eggAudio();
+  if (ac && reversedStart) {
+    ac.resume();
+    const src = ac.createBufferSource(), gain = ac.createGain();
+    src.buffer = reversedStart;
+    gain.gain.value = settings.sfx;
+    src.connect(gain);
+    gain.connect(ac.destination);
+    src.start(0, Math.max(0, reversedStart.duration - REWIND_FROM));   // so the sound lines up with the picture
+  }
+}
+function rewindTime() {
+  const t = REWIND_FROM - (performance.now() / 1000 - rewind.at);
+  if (t > 0) return t;
+  rewind = null;
+  running = false;
+  setTimeout(() => { quip("Let's try that again."); play().catch(() => {}); }, 700);
+  return 0;
+}
+
+// a quick full-screen flash of colour
+function flash(colour) {
+  fade.style.transition = 'none';
+  fade.style.background = colour;
+  fade.style.opacity = 0.9;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    fade.style.transition = 'opacity .8s ease';
+    fade.style.opacity = 0;
+    setTimeout(() => { fade.style.background = '#000'; fade.style.transition = ''; }, 850);
+  }));
+}
+
+// type a name and they drop by: slide in beside the menu cube, say their piece, slide off
+const VISITORS = {
+  gary: { who: 'Gary', line: 'Morning! Still clean?', color: 0x9fe3d5, size: 0.42 },
+  doctor: { who: 'Dr', line: "You're doing great. Keep not rolling.", card: true, size: 0.5 },
+  wife: { who: 'Wife', line: "Don't you roll in this house.", color: 0xff7ac0, size: 0.42 },
+  baby: { who: 'Baby', line: '[tiny startup noises]', color: 0xc4bbff, size: 0.18 },
+  boss: { who: 'Boss', line: "You're still fired.", color: 0x5a4ac8, size: 0.42, tall: true },
+  teen: { who: 'Teen', line: 'Mine has a Mii.', color: 0xf4f2ff, size: 0.32 },
+};
+for (const v of Object.values(VISITORS)) {
+  v.mesh = new THREE.Mesh(cube.geometry, new THREE.MeshLambertMaterial(v.card
+    ? { color: 0x9a96b0, emissive: 0x24223a }
+    : { color: v.color, emissive: 0x1a1450, emissiveIntensity: 0.5 }));
+  if (v.card) {
+    const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.36), new THREE.MeshBasicMaterial({ map: cardLabelText('59') }));
+    tag.position.z = 0.52;
+    v.mesh.add(tag);
+  }
+  v.mesh.visible = false;
+  scene.add(v.mesh);
+}
+let visitor = null;
+function visit(name) {
+  if (visitor) visitor.v.mesh.visible = false;
+  visitor = { v: VISITORS[name], at: performance.now() / 1000 };
+  setTimeout(() => { quip(visitor.v.line); speak(visitor.v.who, visitor.v.line, true); }, 700);
+}
+function updateVisitor(t, camRight, camUp, toCam) {
+  if (!visitor) return;
+  const { v, at } = visitor, k = t - at, mesh = v.mesh;
+  if (k > 5.2) { mesh.visible = false; visitor = null; return; }
+  // in from off-screen right, a pause to talk, back out
+  const inn = easeOut(clamp(k / 0.7)), out = easeInOut(clamp((k - 4.4) / 0.8)), s = ghost.scale.x;
+  const size = s * v.size, w = v.card ? size * 0.8 : size, h = v.card ? size * 1.1 : v.tall ? size * 1.7 : size, d = v.card ? size * 0.22 : size;
+  mesh.visible = true;
+  mesh.scale.set(w, h, d);
+  mesh.quaternion.copy(camera.quaternion);
+  const talking = k > 0.7 && k < 2.6 ? Math.abs(Math.sin(t * 17)) : 0;
+  mesh.position.copy(ghost.position)
+    .addScaledVector(camRight, s * lerp(2.2, 0.85, inn) + s * 1.6 * out)
+    .addScaledVector(camUp, -s * 0.5 + h / 2 + talking * s * 0.04)
+    .addScaledVector(toCam, s * 0.6);
+}
+
+// the menu cube as 125 little cubes, for "voxels"
+const menuVoxelHome = [], menuVoxelDir = [];
+for (let x = 0; x < 5; x++) for (let y = 0; y < 5; y++) for (let z = 0; z < 5; z++) {
+  const home = new THREE.Vector3(x - 2, y - 2, z - 2).multiplyScalar(0.2);
+  menuVoxelHome.push(home);
+  menuVoxelDir.push(home.clone().add(new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.6)).normalize());
+}
+const menuVoxels = new THREE.InstancedMesh(new THREE.BoxGeometry(0.92, 0.92, 0.92), new THREE.MeshLambertMaterial({ color: 0xb4a8ff, emissive: 0x3b2fa0, emissiveIntensity: 0.6 }), menuVoxelHome.length);
+menuVoxels.visible = false;
+scene.add(menuVoxels);
+const voxP = new THREE.Vector3(), menuVoxS = new THREE.Vector3();   // own scale: the story's voxels share voxM/voxQ but need voxS left at 1
+Object.assign(mischief, { burstAt: -9, reformed: true });
+
+// "help": the classic fix
+function turnItOffAndOn() {
+  quip('Have you tried turning it off and on again?');
+  setTimeout(() => {
+    fade.style.opacity = 1;
+    setTimeout(() => {
+      menu.pause();
+      menuStarted = false;
+      turn.from.identity(); turn.to.identity(); turn.at = -1; side = null;
+      play().catch(() => {});
+      fade.style.opacity = 0;
+    }, 600);
+  }, 1600);
+}
+
+// hold B: the cube trips over its own startup and tumbles off into the void
+let blooper = null;
+function blooperCube(t) {
+  const TRIP = ROLL_START + 4 * BEAT, k = t - TRIP;
+  if (k < 0) return;
+  cube.position.set(cell(4).x + k * 2.6, 0.5 + 1.2 * Math.sin(Math.min(k, 0.5) * Math.PI) * (k < 0.5 ? 1 : 0) - Math.max(0, k - 0.5) ** 2 * 9, cell(4).z - k * 1.2);
+  cube.rotation.set(k * 7, k * 3, k * 5);
+  if (k > 1.1 && !blooper.done) {
+    blooper.done = true;
+    audio.pause();
+    running = false;   // freeze on black
+    setTimeout(() => quip("We'll fix it in post."), 500);
+    setTimeout(() => { blooper = null; play().catch(() => {}); }, 2400);
+  }
+}
+
+// click the title while it's up
+document.querySelector('#title .logo').addEventListener('click', () => {
+  if (now() < CHIME || ghost.visible) return;
+  const title = document.getElementById('title');
+  title.classList.remove('wobble');
+  void title.offsetWidth;
+  title.classList.add('wobble');
+  quip("Hey. I'm load-bearing.");
+});
+
+// ---- hold M / X / T / 0 at startup: mirrored, upside down, tiny, or a silent film ----
+const startupLook = { mirror: false, flip: false, tiny: false, film: false, pending: false };
+function applyStartupLook() {
+  const L = startupLook, title = document.querySelector('#title .logo');
+  L.pending = L.mirror || L.flip || L.tiny || L.film;
+  const turnIt = L.mirror ? 'scaleX(-1)' : L.flip ? 'rotate(180deg)' : '';
+  renderer.domElement.style.transform = turnIt;
+  title.style.transform = turnIt;
+  if (L.tiny) setTimeout(() => { audio.preservesPitch = false; audio.playbackRate = 1.25; }, 0);   // a tiny voice (after play() sets its own)
+  if (L.film) {
+    document.body.classList.add('film');
+    setTimeout(() => (audio.volume = 0), 0);
+    // intertitles
+    [[0.4, 'THE CUBE ROLLS.'], [2.4, 'IT KEEPS ROLLING.'], [4.4, 'BEHOLD: A LOGO.'], [9.5, 'IT FLIES.']]
+      .forEach(([at, text]) => setTimeout(() => quip(text, 1.8), at * 1000));
+  }
+}
+function endStartupLook() {
+  const L = startupLook;
+  L.pending = false;
+  renderer.domElement.style.transform = '';
+  document.querySelector('#title .logo').style.transform = '';
+  if (L.mirror) quip('Wait. Which way is left?');
+  if (L.flip) quip("That's better.");
+  if (L.film) setTimeout(() => { document.body.classList.remove('film'); quip('And then there was sound.'); }, 2200);
+}
+
+// "cake": the circle cake, on top
+const cakeTop = new THREE.Group();
+const cakeLayer = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.12, 32), new THREE.MeshLambertMaterial({ color: 0xffd1ea }));
+const cakeCandle = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.09, 0.02), new THREE.MeshBasicMaterial({ color: 0xffc86b }));
+cakeLayer.position.y = 0.56;
+cakeCandle.position.y = 0.66;
+cakeTop.add(cakeLayer, cakeCandle);
+cakeTop.visible = false;
+ghost.add(cakeTop);
+Object.assign(mischief, { lammyAt: -9, danceAt: -9, flipAt: -9, escapes: 0, hiddenAt: 0, crampedAt: 0 });
+
+// "credits"
+function rollCredits() {
+  const box = document.getElementById('credits'), roll = document.getElementById('creditsRoll');
+  roll.innerHTML = `<h3>GAMESQUARE</h3><small>A CUBE PRODUCTION</small>
+    <h3>Starring</h3>The Cube<br>His Wife<br>The Baby (now a Teen)<br>Gary from Next Door<br>Dr. Memory Card (59, later 251 blocks)<br>The Boss<br>A Coworker Who Saw Everything
+    <h3>Also Starring</h3>The Car (voxels)<br>A Stray Block<br>A Circle Cake
+    <h3>Special Thanks</h3>Skyler<br>Anyone Who Read the Terms of Service
+    <h3>Legal</h3>No Wiis were harmed in the making of this startup.<br>The chime chose us.`;
+  roll.style.animation = 'none';
+  void roll.offsetWidth;
+  roll.style.animation = '';
+  box.classList.add('on');
+  menuChime();
+  setTimeout(() => box.classList.remove('on'), 16200);
+}
+
+// double-click: a somersault; right-click: no peeking
+const cubeUnder = e => {
+  mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  return ray.intersectObject(glassMesh).length > 0;
+};
+addEventListener('dblclick', e => {
+  if (!menuShowing() || !cubeUnder(e)) return;
+  mischief.flipAt = performance.now() / 1000;
+  setTimeout(() => quip('Ta-da.'), 800);
+});
+addEventListener('contextmenu', e => {
+  if (!menuShowing() || !cubeUnder(e)) return;
+  e.preventDefault();
+  quip('No inspecting the cube.');
+});
+// leave the tab for a while and come back
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { mischief.hiddenAt = performance.now(); return; }
+  if (mischief.hiddenAt && performance.now() - mischief.hiddenAt > 30000 && menuShowing()) setTimeout(() => quip('Oh. You came back.'), 600);
+});
+// squash the window
+addEventListener('resize', () => {
+  if ((innerWidth < 520 || innerHeight < 360) && menuShowing() && performance.now() - mischief.crampedAt > 10000) {
+    mischief.crampedAt = performance.now();
+    quip("It's cramped in here.");
+  }
+});
+// called from the menu cube's update once it's settled: everything above, applied to the cube
+function menuMischief(toCam) {
+  const t = performance.now() / 1000;
+  const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+  const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+  // visitors stand beside the cube while they talk
+  updateVisitor(t, camRight, camUp, toCam);
+  // voxels: the cube comes apart into little cubes and pulls itself back together
+  const b = t - mischief.burstAt;
+  menuVoxels.visible = b >= 0 && b < 2.4;
+  if (menuVoxels.visible) {
+    ghost.visible = false;
+    const out = b < 0.8 ? easeOut(b / 0.8) : b < 1.4 ? 1 : 1 - easeInOut(clamp((b - 1.4) / 0.9));
+    if (b > 2.3 && !mischief.reformed) { mischief.reformed = true; thud(0.8); }
+    if (b < 0.1) mischief.reformed = false;
+    menuVoxelHome.forEach((home, i) => {
+      voxP.copy(home).multiplyScalar(ghost.scale.x).applyQuaternion(ghost.quaternion).add(ghost.position)
+        .addScaledVector(menuVoxelDir[i], out * ghost.scale.x * 1.1);
+      voxQ.setFromEuler(new THREE.Euler(out * i, out * i * 0.7, 0));
+      voxM.compose(voxP, voxQ, menuVoxS.setScalar(ghost.scale.x * (0.18 - 0.06 * out)));
+      menuVoxels.setMatrixAt(i, voxM);
+    });
+    menuVoxels.instanceMatrix.needsUpdate = true;
+  }
+  // lammy: four hops on the beat; dance: wiggle and bounce; double-click: a somersault
+  const lm = t - mischief.lammyAt;
+  if (lm < 2) ghost.position.addScaledVector(camUp, Math.abs(Math.sin(lm * Math.PI * 2)) * 0.15 * ghost.scale.x);
+  const dn = t - mischief.danceAt;
+  if (dn < 4) {
+    ghost.rotateOnWorldAxis(camUp, Math.sin(dn * 8) * 0.35);
+    ghost.rotateOnWorldAxis(toCam, Math.sin(dn * 4) * 0.15);
+    ghost.position.addScaledVector(camUp, Math.abs(Math.sin(dn * 8)) * 0.08 * ghost.scale.x);
+  }
+  const fl = clamp((t - mischief.flipAt) / 0.8);
+  if (fl < 1) ghost.rotateOnWorldAxis(camRight, -easeInOut(fl) * Math.PI * 2);
+  // a happy hop for the chime
+  const h = t - mischief.hopAt;
+  if (h < 0.7) ghost.position.addScaledVector(camUp, Math.sin(Math.PI * h / 0.7) * 0.3 * ghost.scale.x);
+  // dizzy: a wobble that settles
+  const dz = clamp((t - mischief.dizzyAt) / 3.2);
+  if (dz < 1) {
+    ghost.rotateOnWorldAxis(toCam, Math.sin(t * 9) * 0.25 * (1 - dz));
+    ghost.rotateOnWorldAxis(camRight, Math.cos(t * 7) * 0.12 * (1 - dz));
+  }
+  // Konami: three full spins
+  const k = clamp((t - mischief.konamiAt) / 1.8);
+  if (k < 1) ghost.rotateOnWorldAxis(camUp, easeInOut(k) * Math.PI * 6);
+  // pokes: a jiggle
+  if (t < mischief.shakeUntil) ghost.position.addScaledVector(camRight, (Math.random() - 0.5) * mischief.shake * ghost.scale.x);
+  // storming off to the right, then sliding back in
+  const s = t - mischief.stormAt;
+  if (s < 4.4) {
+    const away = s < 0.8 ? easeInOut(s / 0.8) : s < 3.2 ? 1 : 1 - easeInOut(clamp((s - 3.2) / 1.2));
+    ghost.position.addScaledVector(camRight, away * ghost.scale.x * 2.6);
+  }
+  // asleep after 90 seconds with nobody touching anything
+  const idle = (performance.now() - mischief.lastInput) / 1000;
+  if (idle > 90 && menuShowing() && !mischief.asleep) { mischief.asleep = true; caption.textContent = 'z z z'; caption.style.opacity = 0.7; }
+  mischief.sleepiness = mischief.asleep ? clamp((idle - 90) / 3) : Math.max(0, mischief.sleepiness - 0.05);
+  if (mischief.sleepiness > 0) {
+    ghost.rotateOnWorldAxis(camRight, -rad(14) * mischief.sleepiness);   // nods forward
+    ghost.position.addScaledVector(camUp, -0.12 * ghost.scale.x * mischief.sleepiness * (1 + 0.15 * Math.sin(t * 1.4)));
+  }
+}
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+  cardCam.aspect = innerWidth / innerHeight;
+  cardCam.updateProjectionMatrix();
+  eggCam.aspect = innerWidth / innerHeight;
+  eggCam.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+renderer.setAnimationLoop(() => {
+  if (egg.active) {
+    // if anything in the story ever breaks, drop out of it rather than freezing the page
+    try { if (egg.sequel ? sequelFrame() : eggFrame()) return; } catch (err) { console.error(err); endEgg(); }
+  }
+  const t = now();
+  if (t >= OUT && !whooshed) { whooshed = true; whoosh.currentTime = 0; whoosh.volume = startupLook.film ? 0 : settings.sfx; whoosh.play().catch(() => {}); }
+  if (t >= OUT && startupLook.pending) endStartupLook();
+  // menu theme starts once the cube has arrived, fading in over 1.5s, and loops
+  const MENU = OUT + APPROACH;
+  if (t >= MENU && !menuStarted) { menuStarted = true; menu.currentTime = 0; menu.volume = 0; menu.play().catch(() => {}); }
+  if (menuStarted) menu.volume = clamp((t - MENU) / 1.5) * settings.music * (1 - 0.5 * mischief.sleepiness);
+  if (emuBox.classList.contains('on')) return;   // nothing to draw behind a running game
+  if (cardView.open) {
+    updateCard(performance.now() / 1000);
+    renderer.render(cardScene, cardCam);
+  } else {
+    update(t);
+    renderer.render(scene, camera);
+  }
+});
+</script>
+</body>
+</html>
