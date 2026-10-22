@@ -57,6 +57,21 @@
     text-align: center; line-height: 1.5;
     color: #fff; font: clamp(26px, 5vw, 54px)/1 "GameCube", "Arial Black", Arial, sans-serif; letter-spacing: .08em;
   }
+  /* Square Off: the shooter's HUD */
+  #shootHud { position: fixed; inset: 0; z-index: 6; pointer-events: none; display: none; color: #f2f0ff; font: 600 14px/1.3 "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  #shootHud.on { display: block; }
+  #shHealth { position: absolute; top: 20px; left: 20px; display: flex; gap: 6px; }
+  #shHealth i { width: 18px; height: 18px; border-radius: 3px; border: 2px solid rgba(196,187,255,.8); }
+  #shHealth i.on { background: #8d7ff0; box-shadow: 0 0 10px rgba(150,130,255,.8); }
+  #shScore { position: absolute; top: 16px; right: 20px; text-align: right; font: 800 28px/1 "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: .02em; }
+  #shBig .num { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-weight: 800; }
+  #shScore small { display: block; margin-top: 6px; font: 600 12px "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: .12em; text-transform: uppercase; opacity: .7; }
+  #shCross { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px; border: 2px solid rgba(255,255,255,.85); border-radius: 3px; }
+  #shBanner { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 12px; opacity: 0; transition: opacity .3s; }
+  #shBig { font: clamp(28px, 6vw, 64px)/1 "GameCube", "Arial Black", sans-serif; letter-spacing: .08em; text-shadow: 0 0 24px rgba(150,130,255,.7); }
+  #shSmall { font-size: 15px; letter-spacing: .06em; opacity: .8; }
+  #shHurt { position: absolute; inset: 0; opacity: 0; box-shadow: inset 0 0 160px rgba(255,40,70,.9); }
+  #shHelp { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; font-size: 12px; letter-spacing: .08em; opacity: .55; }
   /* the Terms of Service: a long grey column of very small print */
   #tos { position: fixed; inset: 0; z-index: 4; display: none; background: rgba(6,4,18,.97); }
   #tos.on { display: block; }
@@ -246,6 +261,56 @@ const makeTile = (pos, size) => {
 const tiles = path.map((_, i) => makeTile(cell(i), 0.94));
 const core = makeTile(new THREE.Vector3(0, 0, 0), CORE);
 
+// shading for the finished logo: only light and shadow, laid over the tiles so it works whatever colour they are.
+// Light comes from the top left, with a bevel along every edge.
+const SHADE_SPAN = 5.4;
+function logoShadeTexture() {
+  const S = 1024, u = S / SHADE_SPAN, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+  const at = v => S / 2 + v * u;   // world x (or z) -> canvas pixels; canvas top is the top of the logo
+  const rect = (x0, z0, x1, z1) => g.rect(at(x0), at(z0), (x1 - x0) * u, (z1 - z0) * u);
+  const logo = () => {
+    // the G: a 5x5 ring with its inside and the 2-tile gap on the right cut out (even-odd), plus the core
+    rect(-2.5, -2.5, 2.5, 2.5); rect(-1.5, -1.5, 1.5, 1.5); rect(1.5, -1.5, 2.5, 0.5);
+    rect(-CORE / 2, -CORE / 2, CORE / 2, CORE / 2);
+  };
+  g.beginPath();
+  logo();
+  g.clip('evenodd');
+  // overall falloff, bright top left to dark bottom right
+  const fall = g.createLinearGradient(0, 0, S, S);
+  fall.addColorStop(0, 'rgba(255,255,255,.22)');
+  fall.addColorStop(0.5, 'rgba(255,255,255,0)');
+  fall.addColorStop(1, 'rgba(0,0,0,.35)');
+  g.fillStyle = fall;
+  g.fillRect(0, 0, S, S);
+  // bevel: the shadow of everything outside the logo, cast in from one side
+  const edge = (color, d, blur) => {
+    g.save();
+    g.shadowColor = color;
+    g.shadowOffsetX = g.shadowOffsetY = d;
+    g.shadowBlur = blur;
+    g.beginPath();
+    g.rect(-S, -S, S * 3, S * 3);
+    logo();
+    g.fillStyle = '#000';
+    g.fill('evenodd');
+    g.restore();
+  };
+  edge('rgba(255,255,255,.55)', u * 0.05, u * 0.06);
+  edge('rgba(0,0,0,.6)', -u * 0.06, u * 0.08);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 8;
+  return tex;
+}
+const logoShade = new THREE.Mesh(new THREE.PlaneGeometry(SHADE_SPAN, SHADE_SPAN),
+  new THREE.MeshBasicMaterial({ map: logoShadeTexture(), transparent: true, depthWrite: false, opacity: 0 }));
+logoShade.rotation.x = -Math.PI / 2;
+logoShade.position.y = 0.004;
+logoShade.renderOrder = 2;
+scene.add(logoShade);
+
 const cube = new THREE.Mesh(
   roundedBox(1, 0.12, 16),
   new THREE.MeshLambertMaterial({ color: 0x9b8cff, emissive: 0x3b2fa0, emissiveIntensity: 0.5 })
@@ -390,16 +455,13 @@ function gamePlayTexture() {
   g.font = `bold ${S * 0.1}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
   g.fillText('Game Play', S / 2, S * 0.12);
 
-  // game disc
-  const cx = S / 2, cy = S * 0.48, R = S * 0.24;
-  g.fillStyle = 'rgba(255,255,255,.1)';
-  g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.arc(cx, cy, R * 0.18, 0, Math.PI * 2, true); g.fill();
+  // game disc, drawn like the memory card: a thin outline and one solid accent (the hub)
+  const cx = S / 2, cy = S * 0.5, R = S * 0.25;
   g.lineWidth = S * 0.005;
   g.strokeStyle = 'rgba(255,255,255,.9)';
   g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.stroke();
-  g.beginPath(); g.arc(cx, cy, R * 0.18, 0, Math.PI * 2); g.stroke();
-  g.strokeStyle = 'rgba(255,255,255,.35)';
-  g.beginPath(); g.arc(cx, cy, R * 0.42, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = 'rgba(205,205,215,.6)';
+  g.beginPath(); g.arc(cx, cy, R * 0.3, 0, Math.PI * 2); g.arc(cx, cy, R * 0.12, 0, Math.PI * 2, true); g.fill();
 
   buttonHint(g, S * 0.24, S * 0.88, S, 'Enter', 'Confirm');
   const tex = new THREE.CanvasTexture(cv);
@@ -426,20 +488,25 @@ function optionsTexture() {
   g.font = `bold ${S * 0.1}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
   g.fillText('Options', S / 2, S * 0.12);
 
-  // gear outline
-  const cx = S / 2, cy = S * 0.48, R = S * 0.2;
+  // gear, drawn like the memory card: a thin outline with tapered teeth and one solid accent (the hub)
+  const cx = S / 2, cy = S * 0.5, R = S * 0.23, r = R * 0.78, TEETH = 8;
   g.lineWidth = S * 0.005;
+  g.lineJoin = 'round';
   g.strokeStyle = 'rgba(255,255,255,.9)';
-  g.fillStyle = 'rgba(255,255,255,.1)';
   g.beginPath();
-  for (let i = 0; i < 16; i++) {   // 8 teeth: alternate outer and inner radius
-    const r = i % 2 ? R * 0.78 : R, a0 = (i - 0.5) / 16 * Math.PI * 2, a1 = (i + 0.5) / 16 * Math.PI * 2;
-    g.arc(cx, cy, r, a0, a1);
+  for (let i = 0; i < TEETH; i++) {
+    const a = i / TEETH * Math.PI * 2, step = Math.PI * 2 / TEETH;
+    // each tooth: wide at the root, narrower at the tip; the gap between teeth follows the root circle
+    g.arc(cx, cy, r, a - step / 2, a - step * 0.22);
+    g.lineTo(cx + R * Math.cos(a - step * 0.15), cy + R * Math.sin(a - step * 0.15));
+    g.arc(cx, cy, R, a - step * 0.15, a + step * 0.15);
+    g.lineTo(cx + r * Math.cos(a + step * 0.22), cy + r * Math.sin(a + step * 0.22));
+    g.arc(cx, cy, r, a + step * 0.22, a + step / 2);
   }
   g.closePath();
-  g.fill();
   g.stroke();
-  g.beginPath(); g.arc(cx, cy, R * 0.32, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = 'rgba(205,205,215,.6)';
+  g.beginPath(); g.arc(cx, cy, r * 0.42, 0, Math.PI * 2); g.arc(cx, cy, r * 0.24, 0, Math.PI * 2, true); g.fill();
 
   buttonHint(g, S * 0.24, S * 0.88, S, 'Enter', 'Confirm');
   const tex = new THREE.CanvasTexture(cv);
@@ -585,15 +652,20 @@ function update(t) {
 
   // tiles appear on each landing, everything flashes on the chime
   const chime = t >= CHIME ? Math.exp(-(t - CHIME) * 2.2) : 0;
-  const showTile = (m, age) => {
+  // once the logo is drawn, the ring's tiles grow over their gaps into one solid G
+  const join = 1 + (1.003 / 0.94 - 1) * easeInOut(clamp((t - CHIME) / 0.45));
+  const showTile = (m, age, grow = 1) => {
     m.visible = age >= 0;
     if (!m.visible) return;
     const p = easeOut(clamp(age / 0.12));
-    m.scale.set(0.6 + 0.4 * p, 0.6 + 0.4 * p, 1);
+    m.scale.set((0.6 + 0.4 * p) * grow, (0.6 + 0.4 * p) * grow, 1);
     m.material.color.copy(TILE).lerp(TILE_LIT, clamp(0.6 * Math.exp(-age * 8) + 0.9 * chime + (t >= CHIME ? 0.2 : 0)));
   };
-  tiles.forEach((m, i) => showTile(m, t - landTime(i)));
+  tiles.forEach((m, i) => showTile(m, t - landTime(i), join));
   showTile(core, t - CHIME);
+  // shading settles in once the tiles have joined, and lifts off before they're pulled away
+  logoShade.material.opacity = easeInOut(clamp((t - CHIME - 0.35) / 0.6)) * (1 - easeInOut(clamp((t - OUT) / 0.2)));
+  logoShade.visible = logoShade.material.opacity > 0;
   paintSpecial(t);   // rainbow / holiday colours, if any (see "easter eggs")
 
   // ---- outro: tiles get sucked into a see-through cube, which flies up to the camera ----
@@ -644,7 +716,7 @@ function update(t) {
     const home = i < tiles.length ? cell(i) : new THREE.Vector3(0, 0, 0);
     m.position.copy(home).setY(0.001).lerp(ghost.position, f);
     m.material.opacity = 1 - f;
-    if (w > 0) m.scale.setScalar(1 - 0.85 * f);
+    if (w > 0) m.scale.setScalar((1 - 0.85 * f) * (i < tiles.length ? join : 1));
     if (f >= 1) m.visible = false;
   });
 
@@ -898,6 +970,8 @@ const VOXEL = {
   M: ['10001', '11011', '10101', '10101', '10001', '10001', '10001'],
   A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],
   E: ['11111', '10000', '10000', '11110', '10000', '10000', '11111'],
+  V: ['10001', '10001', '10001', '10001', '10001', '01010', '00100'],
+  Z: ['11111', '00001', '00010', '00100', '01000', '10000', '11111'],
   '^': ['0001000', '0011100', '0111110', '1111111', '0011100', '0011100', '0011100'],
 };
 const voxelGeo = roundedBox(1, 0.1, 2);
@@ -936,10 +1010,12 @@ const CONSOLES = [
   { name: 'MAME', core: 'mame', accept: '.zip,.7z' },
   { name: 'SNES', core: 'snes', accept: '.sfc,.smc,.zip' },
   { name: 'NES', core: 'nes', accept: '.nes,.zip' },
+  // not an emulator: Rhys's Plants vs. Zombies port, opened straight from its own site
+  { name: 'PVZ', url: 'https://rhysflores.github.io/plantsvszombies/' },
 ];
 const consoleWords = CONSOLES.map((con, i) => {
-  const word = voxelText(con.name, 0.11);
-  word.userData.home = new THREE.Vector3(0, (2 - i) * 1.02 - 0.2, 0);
+  const word = voxelText(con.name, 0.1);
+  word.userData.home = new THREE.Vector3(0, ((CONSOLES.length - 1) / 2 - i) * 0.84 + 0.05, 0);
   word.userData.i = i;
   cardScene.add(word);
   return word;
@@ -1422,6 +1498,42 @@ function playGame(file, core) {
   syncSaves(frame, gameTitle(file), CONSOLES.find(c => c.core === core).name);
   menu.pause();
 }
+function playSite(url) {
+  clearInterval(saveTimer);
+  pullSave = () => {};   // no emulator saves to sync for a site
+  const frame = document.createElement('iframe');
+  frame.allow = 'fullscreen; gamepad; autoplay';
+  frame.src = url;
+  emuBox.querySelector('iframe')?.remove();
+  emuBox.prepend(frame);
+  emuBox.classList.add('on');
+  // same loading screen as the emulators, until the site's game is on screen
+  const box = document.getElementById('loading'), fill = document.getElementById('ldFill'), text = document.getElementById('ldText');
+  const t0 = performance.now();
+  document.getElementById('ldName').textContent = 'Plants vs. Zombies';
+  text.textContent = 'Loading';
+  box.classList.remove('done');
+  const finish = () => {
+    clearInterval(loadTimer);
+    fill.style.width = '100%';
+    box.classList.add('done');
+    chunkIn();
+    frame.focus();
+  };
+  box.onclick = finish;
+  frame.onload = () => {
+    // from another address (the local copy) the game's page can't be watched, so show its own loader
+    try { frame.contentDocument.body; } catch { finish(); }
+  };
+  clearInterval(loadTimer);
+  loadTimer = setInterval(() => {
+    const elapsed = (performance.now() - t0) / 1000;
+    try { if (frame.contentDocument.body.classList.contains('game-mode')) return finish(); } catch {}
+    fill.style.width = Math.min(96, 100 * (1 - Math.exp(-elapsed / 8))) + '%';
+  }, 200);
+  chunkIn();
+  menu.pause();
+}
 function closeGame() {
   pullSave();   // grab the latest save before the game goes away
   clearInterval(saveTimer);
@@ -1617,7 +1729,8 @@ function choose() {
   const item = cardView.mode === 'slots' ? viewItems()[cardView.sel] : null;
   if (item && item.save) sfx(hoverSnd);   // a Memory Card block uses the hover sound
   else if (cardView.mode === 'consoles' || cardView.sel === ARROW || item) playSelect();
-  if (cardView.mode === 'consoles') swapScreen('slots', CONSOLES[cardView.sel]);
+  if (cardView.mode === 'consoles' && CONSOLES[cardView.sel].url) playSite(CONSOLES[cardView.sel].url);
+  else if (cardView.mode === 'consoles') swapScreen('slots', CONSOLES[cardView.sel]);
   else if (cardView.mode === 'slots' && cardView.sel === ARROW) cardView.console ? upload() : saveInput.click();
   else if (cardView.mode === 'slots') {
     if (item && item.file) playGame(item.file, cardView.console.core);
@@ -1653,6 +1766,7 @@ addEventListener('click', e => {
 
 addEventListener('keydown', e => {
   if (waiting) return kick();
+  if (shooter.active) return shooterKey(e);
   if (egg.active) { if (e.key === 'Escape') endEgg(); return; }   // Esc skips the secret
   if (tosOpen) { tosKey(e); return; }
   if (emuBox.classList.contains('on')) return;   // the game has the keyboard
@@ -1697,7 +1811,7 @@ addEventListener('keydown', e => {
     if (cardView.mode === 'consoles') {
       const next = cardView.sel + mv[1];
       if (next < 0 && ++mischief.topBumps === 5) { mischief.topBumps = 0; quip("There's nothing above PS1. We checked."); }
-      if (next >= CONSOLES.length && ++mischief.bottomBumps === 5) { mischief.bottomBumps = 0; quip('Below NES is just more NES.'); }
+      if (next >= CONSOLES.length && ++mischief.bottomBumps === 5) { mischief.bottomBumps = 0; quip('Below PVZ is just more zombies.'); }
       select(clamp(next, 0, CONSOLES.length - 1));
     } else if (cardView.sel === ARROW) {
       if (mv[0] < 0) select(cardView.row * COLS + COLS - 1);
@@ -3175,7 +3289,7 @@ function quip(text, seconds = 3.4) {
   clearTimeout(quipTimer);
   quipTimer = setTimeout(() => (caption.style.opacity = 0), seconds * 1000);
 }
-const menuShowing = () => running && !waiting && !cardView.open && !egg.active && !tosOpen && !emuBox.classList.contains('on') && now() >= OUT + APPROACH;
+const menuShowing = () => running && !waiting && !shooter.active && !cardView.open && !egg.active && !tosOpen && !emuBox.classList.contains('on') && now() >= OUT + APPROACH;
 const mischief = { konamiAt: -9, shakeUntil: 0, shake: 0, stormAt: -9, pokes: 0, lastPoke: 0, lastInput: performance.now(), asleep: false, sleepiness: 0,
   hopAt: -9, dizzyAt: -9, swirl: 0, lastAngle: null, lastSwirl: 0, emptyDeletes: 0, topBumps: 0, bottomBumps: 0, flips: [] };
 
@@ -3595,8 +3709,450 @@ function menuMischief(toCam) {
   }
 }
 
+
+// ---- click the rolling cube five times while it draws the logo: Square Off, a third-person shooter ----
+// You're the startup cube. The other cubes hop in from the edges in waves and you shoot them into voxels.
+const shooter = { active: false, clicks: 0, lastClick: 0, state: 'play', paused: false, firing: false, lastShot: 0,
+  hp: 5, score: 0, wave: 0, toSpawn: [], spawnAt: 0, waveAt: 0, hurtAt: -9, shake: 0, yaw: 0, pitch: 0.18,
+  pos: new THREE.Vector3(), vel: new THREE.Vector3(), vy: 0, jump: 0, last: 0, clock: 0 };
+const SHOOT_ARENA = 22, SHOOT_HP = 5;
+const shootScene = new THREE.Scene();
+shootScene.background = new THREE.Color(0x05040c);
+shootScene.fog = new THREE.Fog(0x05040c, 20, 54);
+const shootCam = new THREE.PerspectiveCamera(62, 1, 0.1, 120);
+shootScene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const shootSun = new THREE.DirectionalLight(0xffffff, 0.8);
+shootSun.position.set(6, 14, 8);
+shootScene.add(shootSun);
+
+// the floor: the intro's purple tiles, darker, with a bright border round the edge
+{
+  const n = SHOOT_ARENA * 2 + 1, geo = new THREE.PlaneGeometry(0.94, 0.94);
+  geo.rotateX(-Math.PI / 2);
+  // a hair below zero and pushed back in depth, so cube bottoms resting at y = 0 don't flicker against it
+  const floor = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 }), n * n);
+  floor.position.y = -0.02;
+  const m = new THREE.Matrix4(), c = new THREE.Color();
+  let i = 0;
+  for (let x = -SHOOT_ARENA; x <= SHOOT_ARENA; x++) for (let z = -SHOOT_ARENA; z <= SHOOT_ARENA; z++) {
+    floor.setMatrixAt(i, m.makeTranslation(x, 0, z));
+    const edge = Math.max(Math.abs(x), Math.abs(z)) === SHOOT_ARENA;
+    c.copy(TILE).multiplyScalar(edge ? 1.3 : 0.32 + 0.1 * ((x * 7 + z * 13) % 3 === 0));
+    floor.setColorAt(i++, c);
+  }
+  shootScene.add(floor);
+}
+// glass pillars for cover: [x, z, half-width, height]
+const PILLARS = [[-8, -7, 1, 3], [8, -8, 1.4, 4], [-10, 7, 1.4, 3], [9, 8, 1, 4], [0, -13, 1.4, 3], [-2, 12, 1, 3],
+  [15, -1, 1, 4], [-16, -2, 1.4, 4], [5, 3, 1, 3], [-5, 2, 1, 3], [16, 14, 1.4, 3], [-15, -15, 1.4, 3]];
+PILLARS.forEach(([x, z, w, h]) => {
+  const mat = glassMat.clone();
+  mat.uniforms.opacity.value = 0.9;
+  const m = new THREE.Mesh(roundedBox(1, 0.1, 6), mat);
+  m.scale.set(w * 2, h, w * 2);
+  m.position.set(x, h / 2, z);
+  shootScene.add(m);
+});
+// push a point out of any pillar it's inside (r: the thing's own radius); true if it had to
+function outOfPillars(p, r) {
+  let hit = false;
+  PILLARS.forEach(([x, z, w]) => {
+    const dx = p.x - x, dz = p.z - z, reach = w + r;
+    if (Math.abs(dx) >= reach || Math.abs(dz) >= reach) return;
+    hit = true;
+    if (reach - Math.abs(dx) < reach - Math.abs(dz)) p.x = x + Math.sign(dx || 1) * reach;
+    else p.z = z + Math.sign(dz || 1) * reach;
+  });
+  const edge = SHOOT_ARENA - 0.5 - r;
+  if (Math.abs(p.x) > edge || Math.abs(p.z) > edge) hit = true;
+  p.x = clamp(p.x, -edge, edge);
+  p.z = clamp(p.z, -edge, edge);
+  return hit;
+}
+const inPillar = p => PILLARS.some(([x, z, w, h]) => Math.abs(p.x - x) < w && Math.abs(p.z - z) < w && p.y < h);
+
+// how high a rounded cube's centre has to sit so its lowest corner just touches the floor, however it's turned
+const restM = new THREE.Matrix4();
+function restHeight(q, size, radius = 0.12) {
+  const e = restM.makeRotationFromQuaternion(q).elements;   // e[1], e[5], e[9]: how far up each of its axes points
+  return size * ((0.5 - radius) * (Math.abs(e[1]) + Math.abs(e[5]) + Math.abs(e[9])) + radius);
+}
+const UP = new THREE.Vector3(0, 1, 0);
+const shootPlayer = new THREE.Mesh(roundedBox(1, 0.12, 10), new THREE.MeshLambertMaterial({ color: 0x9b8cff, emissive: 0x3b2fa0, emissiveIntensity: 0.5 }));
+shootScene.add(shootPlayer);
+
+// the enemies: hopping cubes that tip over with each hop, like the intro's roll
+const FOES = {
+  grunt: { color: 0xff5a6e, size: 0.9, hp: 1, rest: 0.18, points: 100, damage: 1 },
+  gunner: { color: 0xffd34a, size: 0.9, hp: 2, rest: 0.3, points: 150, damage: 1 },
+  brute: { color: 0xff9f43, size: 1.7, hp: 5, rest: 0.55, points: 300, damage: 2 },
+};
+const foeGeo = roundedBox(1, 0.12, 8);
+let foes = [], shots = [];
+function spawnFoe(kind) {
+  const k = FOES[kind], p = new THREE.Vector3();
+  do {   // somewhere along the edge, not right on top of you or inside a pillar
+    const along = (Math.random() * 2 - 1) * (SHOOT_ARENA - 3), side = Math.floor(Math.random() * 4);
+    p.set(side < 2 ? along : (side === 2 ? 1 : -1) * (SHOOT_ARENA - 3), 0, side < 2 ? (side ? 1 : -1) * (SHOOT_ARENA - 3) : along);
+  } while (p.distanceTo(shooter.pos) < 12 || outOfPillars(p.clone(), k.size / 2));
+  const mesh = new THREE.Mesh(foeGeo, new THREE.MeshLambertMaterial({ color: k.color, emissive: k.color, emissiveIntensity: 0.25 }));
+  mesh.scale.setScalar(k.size);
+  shootScene.add(mesh);
+  foes.push({ kind, k, mesh, hp: k.hp, pos: p, born: shooter.clock, hop: null, restUntil: shooter.clock + 0.6, flash: 0, nextShot: shooter.clock + 2 + Math.random() * 2 });
+}
+function killFoe(f) {
+  shootScene.remove(f.mesh);
+  foes = foes.filter(o => o !== f);
+  burst(f.mesh.position, f.k.color, Math.round(14 * f.k.size), f.k.size);
+}
+
+// voxel bits from anything that breaks
+const BITS = 320;
+const bitMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial(), BITS);
+bitMesh.setColorAt(0, new THREE.Color());   // so its shader is built with per-bit colours from the start
+bitMesh.count = 0;
+bitMesh.frustumCulled = false;
+shootScene.add(bitMesh);
+let bits = [];
+function burst(at, color, n, size = 1) {
+  const c = new THREE.Color(color);
+  for (let i = 0; i < n && bits.length < BITS; i++) {
+    const v = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.9 + 0.3, Math.random() - 0.5).multiplyScalar(9 * Math.sqrt(size));
+    bits.push({ p: at.clone(), v, life: 0.9 + Math.random() * 0.6, max: 1.5, s: (0.12 + Math.random() * 0.12) * size, c });
+  }
+}
+function updateBits(dt) {
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+  bits = bits.filter(b => (b.life -= dt) > 0);
+  bits.forEach((b, i) => {
+    b.v.y -= 22 * dt;
+    b.p.addScaledVector(b.v, dt);
+    if (b.p.y < b.s / 2) { b.p.y = b.s / 2; b.v.y *= -0.4; b.v.x *= 0.7; b.v.z *= 0.7; }
+    bitMesh.setMatrixAt(i, m.compose(b.p, q, sc.setScalar(b.s * Math.min(1, b.life / 0.4))));
+    bitMesh.setColorAt(i, b.c);
+  });
+  bitMesh.count = bits.length;
+  bitMesh.instanceMatrix.needsUpdate = true;
+  if (bitMesh.instanceColor) bitMesh.instanceColor.needsUpdate = true;
+}
+
+// sounds made on the spot
+function blip(f0, f1, dur, type, vol) {
+  const ac = eggAudio();
+  if (!ac || settings.sfx <= 0) return;
+  const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(f0, t);
+  o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(vol * settings.sfx, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(ac.destination);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function crunch(vol) {
+  const ac = eggAudio();
+  if (!ac || settings.sfx <= 0) return;
+  const t = ac.currentTime, buf = ac.createBuffer(1, ac.sampleRate * 0.3, ac.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2);
+  const src = ac.createBufferSource(), lp = ac.createBiquadFilter(), g = ac.createGain();
+  src.buffer = buf; lp.type = 'lowpass'; lp.frequency.value = 1400; g.gain.value = vol * settings.sfx;
+  src.connect(lp); lp.connect(g); g.connect(ac.destination);
+  src.start(t);
+}
+
+// the HUD: health tiles, score and wave, a crosshair, and a line of text for banners
+const shootHud = document.createElement('div');
+shootHud.id = 'shootHud';
+shootHud.innerHTML = '<div id="shHealth"></div><div id="shScore"></div><div id="shCross"></div>' +
+  '<div id="shBanner"><div id="shBig"></div><div id="shSmall"></div></div><div id="shHurt"></div>' +
+  '<div id="shHelp">WASD move · Mouse aim · Click shoot · Space jump · Q leave</div>';
+document.body.appendChild(shootHud);
+const shBig = document.getElementById('shBig'), shSmall = document.getElementById('shSmall'), shBanner = document.getElementById('shBanner');
+function banner(big, small = '', seconds = 0) {
+  // the GameCube font has no digits, so numbers get a plain bold face
+  shBig.innerHTML = big.replace(/\d+/g, '<span class="num">$&</span>');
+  shSmall.textContent = small;
+  shBanner.style.opacity = 1;
+  clearTimeout(banner.timer);
+  if (seconds) banner.timer = setTimeout(() => (shBanner.style.opacity = 0), seconds * 1000);
+}
+function drawHud() {
+  document.getElementById('shHealth').innerHTML = Array.from({ length: SHOOT_HP }, (_, i) => `<i class="${i < shooter.hp ? 'on' : ''}"></i>`).join('');
+  document.getElementById('shScore').innerHTML = `${shooter.score}<small>Wave ${Math.max(1, shooter.wave)}</small>`;
+}
+const bestScore = () => { try { return +localStorage.getItem('gamesquare-squareoff') || 0; } catch { return 0; } };
+
+function resetShooter() {
+  foes.forEach(f => shootScene.remove(f.mesh));
+  shots.forEach(b => shootScene.remove(b.mesh));
+  foes = []; shots = []; bits = [];
+  Object.assign(shooter, { state: 'play', paused: false, firing: false, hp: SHOOT_HP, score: 0, wave: 0, toSpawn: [], waveAt: shooter.clock + 2.4,
+    hurtAt: -9, shake: 0, yaw: 0, pitch: 0.18, vy: 0, jump: 0 });
+  shooter.pos.set(0, 0, 4);
+  shooter.vel.set(0, 0, 0);
+  shootPlayer.quaternion.identity();
+  drawHud();
+}
+function lockMouse() { try { const r = renderer.domElement.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch {} }
+function startShooter() {
+  shooter.active = true;
+  shooter.clicks = 0;
+  shooter.last = performance.now() / 1000;
+  audio.pause();
+  whoosh.pause();
+  resetShooter();
+  shootHud.classList.add('on');
+  banner('SQUARE OFF', 'They want your tiles.', 2.2);
+  chunkIn();
+  lockMouse();
+  menu.currentTime = 0;
+  menu.preservesPitch = false;
+  menu.playbackRate = 1.25;   // the menu theme, but in a hurry
+  menu.volume = settings.music * 0.8;
+  menu.play().catch(() => {});
+}
+function endShooter() {
+  shooter.active = false;
+  shootHud.classList.remove('on');
+  if (document.pointerLockElement) document.exitPointerLock();
+  menu.pause();
+  menu.playbackRate = 1;
+  menu.preservesPitch = true;
+  menuStarted = false;
+  resetShooter();
+  play().catch(() => {});   // and back to the real startup
+}
+function hurtPlayer(n) {
+  if (shooter.state !== 'play' || shooter.clock - shooter.hurtAt < 1) return;
+  shooter.hp = Math.max(0, shooter.hp - n);
+  shooter.hurtAt = shooter.clock;
+  shooter.shake = 0.5;
+  blip(240, 50, 0.35, 'sawtooth', 0.14);
+  drawHud();
+  if (shooter.hp > 0) return;
+  shooter.state = 'over';
+  shooter.firing = false;
+  burst(shootPlayer.position, 0x9b8cff, 40, 1.2);
+  crunch(0.5);
+  const best = Math.max(bestScore(), shooter.score);
+  try { localStorage.setItem('gamesquare-squareoff', best); } catch {}
+  banner('YOU GOT SQUARED', `Score ${shooter.score} · Best ${best} · click to go again · Q to leave`);
+  if (document.pointerLockElement) document.exitPointerLock();
+}
+function nextWave() {
+  const n = ++shooter.wave;
+  const list = [];
+  for (let i = 0; i < 3 + 2 * n; i++) list.push('grunt');
+  for (let i = 0; i < Math.floor(n / 2) + (n > 1); i++) list.push('gunner');
+  for (let i = 0; i < Math.floor((n - 1) / 2); i++) list.push('brute');
+  shooter.toSpawn = list.sort(() => Math.random() - 0.5);
+  shooter.spawnAt = shooter.clock + 0.8;
+  banner('WAVE ' + n, n === 1 ? '' : ['Nice.', 'They brought friends.', 'Bigger cubes now.', 'This is fine.', "Don't look at the tiles."][(n - 2) % 5], 1.8);
+  drawHud();
+  ding(n % 5 === 0);
+}
+
+function shoot(from, dir, speed, enemy) {
+  const mesh = new THREE.Mesh(foeGeo, new THREE.MeshBasicMaterial({ color: enemy ? 0xff8a3d : 0xd9d2ff }));
+  mesh.scale.setScalar(enemy ? 0.32 : 0.2);
+  mesh.position.copy(from);
+  shootScene.add(mesh);
+  shots.push({ mesh, v: dir.clone().normalize().multiplyScalar(speed), life: enemy ? 3 : 1.2, enemy });
+}
+const camFwd = new THREE.Vector3(), camBack = new THREE.Vector3();
+function playerShoot() {
+  // aim where the crosshair points: the first cube along the camera's line of sight, or far away
+  let dist = 60;
+  foes.forEach(f => {
+    const to = f.mesh.position.clone().sub(shootCam.position), along = to.dot(camFwd);
+    if (along > 0 && to.addScaledVector(camFwd, -along).length() < f.k.size * 0.6) dist = Math.min(dist, along);
+  });
+  const target = shootCam.position.clone().addScaledVector(camFwd, dist);
+  const muzzle = shooter.pos.clone().setY(0.6 + shooter.jump).add(new THREE.Vector3(-Math.sin(shooter.yaw), 0, -Math.cos(shooter.yaw)).multiplyScalar(0.6));
+  shoot(muzzle, target.sub(muzzle), 36, false);
+  blip(1500, 420, 0.08, 'square', 0.03);
+}
+
+function shooterFrame() {
+  const real = performance.now() / 1000, dt = shooter.paused ? 0 : Math.min(0.05, real - shooter.last);
+  shooter.last = real;
+  shooter.clock += dt;
+  const T = shooter.clock;
+  const fwd = new THREE.Vector3(-Math.sin(shooter.yaw), 0, -Math.cos(shooter.yaw));
+  const right = new THREE.Vector3(Math.cos(shooter.yaw), 0, -Math.sin(shooter.yaw));
+
+  if (shooter.state === 'play' && dt > 0) {
+    // moving: WASD relative to where you're looking, with a little hop in every step
+    const want = new THREE.Vector3();
+    if (held.has('w') || held.has('arrowup')) want.add(fwd);
+    if (held.has('s') || held.has('arrowdown')) want.sub(fwd);
+    if (held.has('d') || held.has('arrowright')) want.add(right);
+    if (held.has('a') || held.has('arrowleft')) want.sub(right);
+    if (want.lengthSq()) want.normalize().multiplyScalar(7.5);
+    shooter.vel.lerp(want, 1 - Math.exp(-12 * dt));
+    shooter.pos.addScaledVector(shooter.vel, dt);
+    outOfPillars(shooter.pos, 0.5);
+    shooter.vy -= 26 * dt;
+    shooter.jump = Math.max(0, shooter.jump + shooter.vy * dt);
+    if (shooter.jump === 0) shooter.vy = 0;
+    // roll along the floor like the startup cube: a quarter turn for every tile travelled
+    const flat = shooter.vel.clone().setY(0), speed = flat.length();
+    if (speed > 0.01) shootPlayer.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(UP.clone().cross(flat).normalize(), speed * dt * Math.PI / 2));
+    if (speed < 2.5) {
+      // slowing down: settle flat onto whichever face is nearest the floor
+      let best = null;
+      [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)].forEach(a => {
+        a.applyQuaternion(shootPlayer.quaternion);
+        if (!best || Math.abs(a.y) > Math.abs(best.y)) best = a;
+      });
+      const level = new THREE.Quaternion().setFromUnitVectors(best, best.y > 0 ? UP : UP.clone().negate()).multiply(shootPlayer.quaternion);
+      shootPlayer.quaternion.slerp(level, 1 - Math.exp(-(2.5 - speed) * 5 * dt));
+    }
+    if (shooter.firing && T - shooter.lastShot > 0.14) { shooter.lastShot = T; playerShoot(); }
+
+    // waves: start the next once the last one is cleared
+    if (!shooter.toSpawn.length && !foes.length && T >= shooter.waveAt) { if (shooter.wave) shooter.score += 50 * shooter.wave; nextWave(); }
+    if (shooter.toSpawn.length && T >= shooter.spawnAt) { spawnFoe(shooter.toSpawn.pop()); shooter.spawnAt = T + 0.55; }
+    if (!shooter.toSpawn.length && !foes.length && shooter.waveAt < T) shooter.waveAt = T + 2.4;
+  }
+
+  // the player cube
+  shootPlayer.visible = shooter.state === 'play' && (T - shooter.hurtAt > 1 || Math.floor(T * 14) % 2 === 0);
+  shootPlayer.position.copy(shooter.pos).setY(restHeight(shootPlayer.quaternion, 1) + shooter.jump);
+
+  // the enemies
+  foes.slice().forEach(f => {
+    const m = f.mesh, size = f.k.size, age = T - f.born;
+    f.flash = Math.max(0, f.flash - dt * 6);
+    m.material.emissiveIntensity = 0.25 + f.flash * 1.5;
+    if (age < 0.5) {   // dropping in from above, like the startup's first cube
+      const k = age / 0.5;
+      m.position.copy(f.pos).setY(size / 2 + 9 * (1 - k * k));
+      if (age + dt >= 0.5) thud(0.7 / Math.sqrt(size));
+      return;
+    }
+    const toPlayer = shooter.pos.clone().sub(f.pos).setY(0), dist = toPlayer.length();
+    if (f.hop) {
+      const k = clamp((T - f.hop.at) / f.hop.dur), e = easeInOut(k);
+      f.pos.copy(f.hop.from).lerp(f.hop.to, e);
+      m.quaternion.copy(f.hop.q);
+      m.rotateOnWorldAxis(f.hop.axis, Math.PI / 2 * e);
+      m.position.copy(f.pos).setY(restHeight(m.quaternion, size) + size * 0.35 * Math.sin(Math.PI * k));
+      if (k >= 1) { f.hop = null; f.restUntil = T + f.k.rest * (0.7 + Math.random() * 0.6); }
+    } else {
+      m.position.copy(f.pos).setY(restHeight(m.quaternion, size));
+      if (T >= f.restUntil && shooter.state === 'play') {
+        // hop towards you (gunners keep their distance), sliding round pillars
+        let dir = toPlayer.clone().normalize();
+        if (f.kind === 'gunner' && dist < 9) dir.negate();
+        if (f.kind === 'gunner' && Math.abs(dist - 10) < 1.5) dir.set(-dir.z, 0, dir.x).multiplyScalar(Math.random() < 0.5 ? 1 : -1);
+        let to = f.pos.clone().addScaledVector(dir, size * 1.1);
+        for (let tries = 0; tries < 4 && outOfPillars(to.clone(), size / 2); tries++) {
+          dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), (tries % 2 ? -1 : 1) * 1.2 * (tries + 1));
+          to = f.pos.clone().addScaledVector(dir, size * 1.1);
+        }
+        outOfPillars(to, size / 2);
+        f.hop = { from: f.pos.clone(), to, at: T, dur: 0.3 + 0.12 * size, q: m.quaternion.clone(), axis: new THREE.Vector3(0, 1, 0).cross(dir).normalize() };
+      }
+    }
+    if (f.kind === 'gunner' && T >= f.nextShot && dist < 16 && shooter.state === 'play') {
+      f.nextShot = T + 1.6 + Math.random();
+      shoot(m.position.clone(), shooter.pos.clone().setY(0.5 + shooter.jump).sub(m.position), 12, true);
+      blip(520, 180, 0.16, 'sawtooth', 0.035);
+    }
+    // touching you: grunts go off like a bomb, the others knock you about
+    if (dist < size / 2 + 0.55 && shooter.jump < size * 0.8 && shooter.state === 'play') {
+      hurtPlayer(f.k.damage);
+      shooter.vel.addScaledVector(toPlayer.normalize(), 14);
+      if (f.kind === 'grunt') { killFoe(f); crunch(0.3); }
+    }
+  });
+
+  // shots in flight
+  shots = shots.filter(b => {
+    b.life -= dt;
+    b.mesh.position.addScaledVector(b.v, dt);
+    b.mesh.rotation.x += dt * 9; b.mesh.rotation.y += dt * 7;
+    const p = b.mesh.position;
+    let gone = b.life <= 0 || p.y < 0 || inPillar(p) || Math.abs(p.x) > SHOOT_ARENA || Math.abs(p.z) > SHOOT_ARENA;
+    if (!gone && b.enemy && shooter.state === 'play' && p.distanceTo(shootPlayer.position) < 0.7) { hurtPlayer(1); gone = true; }
+    if (!gone && !b.enemy) {
+      const f = foes.find(o => p.distanceTo(o.mesh.position) < o.k.size * 0.62);
+      if (f) {
+        gone = true;
+        f.flash = 1;
+        if (--f.hp <= 0) { shooter.score += f.k.points; killFoe(f); crunch(0.22); drawHud(); }
+        else thud(1.2);
+      }
+    }
+    if (gone) { shootScene.remove(b.mesh); if (b.life > 0) burst(p, b.enemy ? 0xff8a3d : 0xd9d2ff, 4, 0.4); }
+    return !gone;
+  });
+  updateBits(dt);
+
+  // over-the-shoulder camera
+  camBack.set(Math.sin(shooter.yaw) * Math.cos(shooter.pitch), Math.sin(shooter.pitch), Math.cos(shooter.yaw) * Math.cos(shooter.pitch));
+  camFwd.copy(camBack).negate();
+  const pivot = shooter.pos.clone().setY(1.3 + shooter.jump * 0.6);
+  shootCam.position.copy(pivot).addScaledVector(camBack, 5.6).addScaledVector(right, 0.9);
+  shootCam.position.y = Math.max(0.4, shootCam.position.y);
+  shooter.shake = Math.max(0, shooter.shake - dt * 1.5);
+  shootCam.position.x += (Math.random() - 0.5) * shooter.shake;
+  shootCam.position.y += (Math.random() - 0.5) * shooter.shake;
+  shootCam.lookAt(shootCam.position.clone().add(camFwd));
+  document.getElementById('shHurt').style.opacity = clamp(1 - (T - shooter.hurtAt) / 0.6) * 0.8;
+  renderer.render(shootScene, shootCam);
+}
+
+// counting clicks on the cube while it rolls and draws the logo
+addEventListener('pointerdown', e => {
+  if (!running || waiting || egg.active || shooter.active || rewind) return;
+  const t = now();
+  if (t < 0.05 || t >= CHIME || !cube.visible) return;
+  const p = cube.position.clone().project(camera);
+  const dx = (p.x + 1) / 2 * innerWidth - e.clientX, dy = (1 - p.y) / 2 * innerHeight - e.clientY;
+  if (Math.hypot(dx, dy) > innerHeight * 0.13) return;
+  const real = performance.now() / 1000;
+  shooter.clicks = real - shooter.lastClick > 1.5 ? 1 : shooter.clicks + 1;
+  shooter.lastClick = real;
+  cube.material.emissiveIntensity = 1.8;   // it notices
+  thud(1.2 + shooter.clicks * 0.12);
+  if (shooter.clicks >= 5) startShooter();
+});
+// in the game: the mouse aims and fires, Space jumps, Q leaves
+addEventListener('mousemove', e => {
+  if (!shooter.active || document.pointerLockElement !== renderer.domElement || shooter.state !== 'play') return;
+  shooter.yaw -= e.movementX * 0.0024;
+  shooter.pitch = clamp(shooter.pitch + e.movementY * 0.0022, -0.35, 0.75);
+});
+addEventListener('pointerdown', e => {
+  if (!shooter.active || e.button !== 0) return;
+  if (shooter.state === 'over') { resetShooter(); banner('SQUARE OFF', 'Again.', 1.6); lockMouse(); return; }
+  if (document.pointerLockElement !== renderer.domElement) { lockMouse(); return; }
+  shooter.firing = true;
+});
+addEventListener('pointerup', () => (shooter.firing = false));
+document.addEventListener('pointerlockchange', () => {
+  if (!shooter.active || shooter.state !== 'play') return;
+  shooter.paused = document.pointerLockElement !== renderer.domElement;
+  shooter.firing = false;
+  if (shooter.paused) banner('PAUSED', 'Click to keep going · Q to leave');
+  else shBanner.style.opacity = 0;
+});
+function shooterKey(e) {
+  const k = e.key.toLowerCase();
+  if (k === 'q') return endShooter();
+  if (k === ' ') {
+    e.preventDefault();
+    if (shooter.state === 'play' && !shooter.paused && shooter.jump === 0) { shooter.vy = 9; blip(300, 700, 0.12, 'sine', 0.06); }
+  }
+  if (k === 'tab') e.preventDefault();
+}
+
 function resize() {
   renderer.setSize(innerWidth, innerHeight);
+  shootCam.aspect = innerWidth / innerHeight;
+  shootCam.updateProjectionMatrix();
   cardCam.aspect = innerWidth / innerHeight;
   cardCam.updateProjectionMatrix();
   eggCam.aspect = innerWidth / innerHeight;
@@ -3606,6 +4162,8 @@ addEventListener('resize', resize);
 resize();
 
 renderer.setAnimationLoop(() => {
+  if (shooter.active) return shooterFrame();
+  cube.material.emissiveIntensity += (0.5 - cube.material.emissiveIntensity) * 0.12;   // settles after a click (see Square Off)
   if (egg.active) {
     // if anything in the story ever breaks, drop out of it rather than freezing the page
     try { if (egg.sequel ? sequelFrame() : eggFrame()) return; } catch (err) { console.error(err); endEgg(); }
